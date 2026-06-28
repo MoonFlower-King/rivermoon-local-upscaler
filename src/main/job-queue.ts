@@ -8,7 +8,7 @@ import {
   readImageDimensions
 } from "./image.js";
 import { runComfyEngine } from "./comfy-engine.js";
-import { sanitizeSettings } from "./settings.js";
+import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
 import { saveJobs, saveJobsSync } from "./jobs-store.js";
 import type { StartJobsPayload, UpscaleJob, UpscaleSettings } from "./types.js";
@@ -110,18 +110,12 @@ export class JobQueue {
       job.progress = 5;
       job.message = "正在读取图片";
       this.emit();
-      log(
-        `任务开始 ${job.fileName} engine=${job.settings.engineMode} model=${job.settings.model} scale=${job.settings.scale} tile=${job.settings.tileMode} format=${job.settings.outputFormat}`
-      );
+      log(`任务开始 ${job.fileName} format=${job.settings.outputFormat} maxSide=${job.settings.maxSide}`);
 
       const dimensions = await readImageDimensions(job.inputPath);
       job.dimensions = dimensions;
-      const maxSideAdjustment = applyQualityMaxSideGuard(job);
-      job.targetDimensions = computeTargetDimensions(dimensions, job.settings.maxSide, job.settings.scale);
+      job.targetDimensions = computeTargetDimensions(dimensions, job.settings.maxSide, DEFAULT_SCALE);
       job.progress = 15;
-      if (maxSideAdjustment) {
-        job.message = maxSideAdjustment;
-      }
       this.emit();
 
       const outputDirectory = job.settings.outputDirectory || path.join(path.dirname(job.inputPath), "upscaled");
@@ -129,9 +123,8 @@ export class JobQueue {
       const outputPath = buildOutputPath(job.inputPath, outputDirectory, job.settings.outputFormat);
       job.outputPath = outputPath;
 
-      job.settings = { ...job.settings, engineMode: "comfyui", qualityMode: "standard", model: "4x-UltraSharp.pth" };
       job.tileSize = 512;
-      job.message = comfyProcessingMessage(maxSideAdjustment);
+      job.message = "正在用网站同款 CUDA 链路处理";
       job.progress = 18;
       this.emit();
       await runComfyEngine({
@@ -169,7 +162,7 @@ export class JobQueue {
       job.durationMs = elapsedDuration(job);
       job.progress = 100;
       job.message = job.status === "cancelled" ? "已取消" : "处理失败";
-      job.error = formatJobError(error, job.settings);
+      job.error = formatJobError(error);
       this.emit();
       log(`任务${job.status === "cancelled" ? "取消" : "失败"} ${job.fileName} ${job.error ?? ""}`);
     } finally {
@@ -240,25 +233,13 @@ function elapsedDuration(job: UpscaleJob): number {
   return Math.max(0, job.finishedAt - job.startedAt);
 }
 
-function applyQualityMaxSideGuard(_job: UpscaleJob): string | null {
-  return null;
-}
-
-function comfyProcessingMessage(safetyNotice: string | null): string {
-  const base = "正在用网站同款 CUDA 链路处理";
-  return safetyNotice ? `${base}；${safetyNotice}` : base;
-}
-
 function buildOutputPath(inputPath: string, outputDirectory: string, format: UpscaleSettings["outputFormat"]): string {
   const parsed = path.parse(inputPath);
   const ext = outputExtension(format);
   return path.join(outputDirectory, `${parsed.name}_upscaled.${ext}`);
 }
 
-function formatJobError(error: unknown, settings: UpscaleSettings): string {
+function formatJobError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (settings.engineMode === "comfyui") {
-    return `${message} 当前版本只保留网站同款 AI 链路，请确认内置 ComfyUI Runtime 和 4x-UltraSharp.pth 完整。`;
-  }
-  return message;
+  return `${message} 当前版本只保留网站同款 AI 链路，请确认内置 ComfyUI Runtime 和 4x-UltraSharp.pth 完整。`;
 }

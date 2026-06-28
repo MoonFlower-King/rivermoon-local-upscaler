@@ -8,21 +8,11 @@ function settingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
-/** 读取上次保存的设置；文件缺失或损坏时回退到默认值。 */
+/** 读取上次保存的设置；文件缺失或损坏时回退到默认值。
+ *  sanitizeSettings 只挑取合法的 outputFormat/outputDirectory/maxSide，旧版多余字段自动忽略。 */
 export function loadSettings(): UpscaleSettings {
   try {
-    const raw = JSON.parse(fs.readFileSync(settingsPath(), "utf8"));
-    if (raw && typeof raw === "object" && !("engineMode" in raw)) {
-      raw.engineMode = "comfyui";
-      raw.qualityMode = "standard";
-      raw.model = "4x-UltraSharp.pth";
-      raw.maxSide = 4096;
-      raw.enhance = false;
-    }
-    if (raw && typeof raw === "object" && !("qualityMode" in raw)) {
-      raw.qualityMode = "standard";
-    }
-    return sanitizeSettings(raw);
+    return sanitizeSettings(JSON.parse(fs.readFileSync(settingsPath(), "utf8")));
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

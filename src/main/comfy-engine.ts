@@ -14,6 +14,7 @@ import {
   findComfyModel
 } from "./paths.js";
 import { log, logsRoot } from "./logger.js";
+import { DEFAULT_MODEL } from "./settings.js";
 import type { ImageDimensions, ImageFormat, UpscaleSettings } from "./types.js";
 
 const MANAGED_PORT = 18188;
@@ -96,7 +97,7 @@ export function shutdownComfy(): void {
 }
 
 export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
-  assertQualityResources(options.settings);
+  assertQualityResources();
 
   const comfyUrl = await ensureComfyReady(options.signal);
   options.onProgress?.(8);
@@ -106,12 +107,12 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
   const copiedInputPath = path.join(comfyInputRoot(), inputName);
   try {
     const prefix = `rivermoon_desktop_ai/${jobId}`;
-    const prompt = buildStandardPrompt(inputName, normalizeComfyModel(options.settings.model), options.targetDimensions, prefix);
+    const prompt = buildStandardPrompt(inputName, DEFAULT_MODEL, options.targetDimensions, prefix);
     const clientId = `rivermoon-desktop-${crypto.randomUUID()}`;
 
     options.onProgress?.(12);
     const promptId = await submitPrompt(comfyUrl, prompt, clientId, options.signal);
-    log(`ComfyUI 任务已提交 prompt=${promptId} quality=${options.settings.qualityMode} model=${options.settings.model}`);
+    log(`ComfyUI 任务已提交 prompt=${promptId} model=${DEFAULT_MODEL}`);
 
     const history = await waitForPrompt(comfyUrl, promptId, clientId, options.signal, options.onProgress);
     const comfyOutput = findSavedImage(history);
@@ -502,16 +503,9 @@ async function copyOrConvertOutput(sourcePath: string, outputPath: string, forma
   await pipeline.toFile(outputPath);
 }
 
-function normalizeComfyModel(model: string): string {
-  if (model.toLowerCase().endsWith(".pth")) return model;
-  if (model.toLowerCase().includes("ultrasharp")) return "4x-UltraSharp.pth";
-  return model;
-}
-
-function assertQualityResources(settings: UpscaleSettings): void {
-  const modelName = normalizeComfyModel(settings.model);
-  if (!findComfyModel(modelName)) {
-    throw new Error(`缺少 ComfyUI 超分模型 ${modelName}。请确认 comfyui-runtime/models/upscale_models 下存在该 .pth 文件。`);
+function assertQualityResources(): void {
+  if (!findComfyModel(DEFAULT_MODEL)) {
+    throw new Error(`缺少 ComfyUI 超分模型 ${DEFAULT_MODEL}。请确认 comfyui-runtime/models/upscale_models 下存在该 .pth 文件。`);
   }
 }
 

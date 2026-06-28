@@ -4,16 +4,9 @@ import type { AppInfo, AssetStatus, HardwareReport, ImageFormat, UpscaleJob, Ups
 import "./styles.css";
 
 const DEFAULT_SETTINGS: UpscaleSettings = {
-  engineMode: "comfyui",
-  qualityMode: "standard",
-  model: "4x-UltraSharp.pth",
   outputFormat: "png",
   outputDirectory: null,
-  maxSide: 4096,
-  scale: 4,
-  tileMode: "auto",
-  gpuId: "auto",
-  enhance: false
+  maxSide: 4096
 };
 
 function App() {
@@ -60,8 +53,7 @@ function App() {
     setAssetStatus(assets);
     setJobs(currentJobs);
     setAppInfo(info);
-    const reconciled = reconcileSettingsWithAssets(saved, assets);
-    setSettings(reconciled);
+    setSettings(saved);
     setSettingsLoaded(true);
   }
 
@@ -78,7 +70,6 @@ function App() {
     const [assets, currentJobs] = await Promise.all([window.upscaler.getAssetStatus(), window.upscaler.listJobs()]);
     setAssetStatus(assets);
     setJobs(currentJobs);
-    setSettings((current) => reconcileSettingsWithAssets(current, assets));
   }
 
   async function addFiles() {
@@ -103,15 +94,8 @@ function App() {
   async function start() {
     if (pendingPaths.length === 0) return;
     if (!selectedChainReady) return;
-    const safeSettings = {
-      ...settings,
-      engineMode: "comfyui" as const,
-      qualityMode: "standard" as const,
-      model: "4x-UltraSharp.pth",
-      maxSide: settings.maxSide
-    };
-    if (safeSettings.maxSide !== settings.maxSide) setSettings(safeSettings);
-    await window.upscaler.startJobs({ paths: pendingPaths, settings: safeSettings });
+    // 设置已是精简后的合法值；主进程 startJobs 还会再 sanitize 一次。
+    await window.upscaler.startJobs({ paths: pendingPaths, settings });
     setPendingPaths([]);
   }
 
@@ -232,17 +216,6 @@ function modelLicense(model: string): { text: string; warn: boolean } {
   const name = model.toLowerCase();
   if (name.includes("ultrasharp")) return { text: "CC-BY-NC-SA 4.0 · 仅限非商业", warn: true };
   return { text: "授权未知 · 商用前请自行确认", warn: true };
-}
-
-function reconcileSettingsWithAssets(settings: UpscaleSettings, assets: AssetStatus): UpscaleSettings {
-  const models = assets.comfyuiModels.length > 0 ? assets.comfyuiModels : ["4x-UltraSharp.pth"];
-  return {
-    ...settings,
-    engineMode: "comfyui",
-    qualityMode: "standard",
-    model: models.includes(settings.model) ? settings.model : models[0] ?? "4x-UltraSharp.pth",
-    enhance: false
-  };
 }
 
 function AboutModal({
@@ -487,7 +460,7 @@ function JobList({ jobs, now, onCompare }: { jobs: UpscaleJob[]; now: number; on
                   {job.dimensions ? `${job.dimensions.width}x${job.dimensions.height}` : "未知尺寸"} {"->"}{" "}
                   {job.targetDimensions ? `${job.targetDimensions.width}x${job.targetDimensions.height}` : "待计算"}
                 </span>
-                <span>{qualityModeText(job.settings.qualityMode)}</span>
+                <span>{qualityModeText()}</span>
                 <span>{durationText(job, now)}</span>
                 <span>{job.tileSize ? `分块 ${job.tileSize}` : ""}</span>
               </div>
@@ -819,7 +792,7 @@ function formatDuration(durationMs: number): string {
   return `${seconds}秒`;
 }
 
-function qualityModeText(_mode: UpscaleSettings["qualityMode"]) {
+function qualityModeText() {
   return "网站同款 AI";
 }
 

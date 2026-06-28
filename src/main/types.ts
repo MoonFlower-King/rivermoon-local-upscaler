@@ -2,24 +2,19 @@ export type ImageFormat = "png" | "jpg" | "webp";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
-export type EngineMode = "comfyui";
-
+/** 资源状态卡片用的质量档位标识（当前固定 standard = 网站同款 AI）。 */
 export type QualityMode = "standard";
 
+/**
+ * 用户可调的超分设置——只保留真正可变的三项。
+ * 链路（ComfyUI）、模型（4x-UltraSharp）、倍数（4x）均为产品固定常量，
+ * 见 settings.ts 的 DEFAULT_MODEL / DEFAULT_SCALE，不再作为可配置字段。
+ */
 export type UpscaleSettings = {
-  /** 网站同款 PyTorch/CUDA 链路。 */
-  engineMode: EngineMode;
-  /** standard = 4x-UltraSharp 网站同款 AI。 */
-  qualityMode: QualityMode;
-  model: string;
   outputFormat: ImageFormat;
   outputDirectory: string | null;
+  /** 输出长边上限；0 = 不限制（真实放大倍数）。 */
   maxSide: number;
-  scale: 2 | 3 | 4;
-  tileMode: "auto" | "512" | "256" | "128";
-  gpuId: "auto" | string;
-  /** 超分后是否套用网页同款增强（饱和/对比/锐化的通透感）。 */
-  enhance: boolean;
 };
 
 export type ImageDimensions = {

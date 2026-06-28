@@ -218,6 +218,17 @@ function modelLicense(model: string): { text: string; warn: boolean } {
   return { text: "授权未知 · 商用前请自行确认", warn: true };
 }
 
+/** 弹窗通用：按 Esc 关闭。 */
+function useEscapeToClose(onClose: () => void) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
+
 function AboutModal({
   info,
   hardware,
@@ -228,6 +239,7 @@ function AboutModal({
   onClose: () => void;
 }) {
   const [exportNote, setExportNote] = useState<string | null>(null);
+  useEscapeToClose(onClose);
 
   async function handleExport() {
     const saved = await window.upscaler.exportLogs();
@@ -497,6 +509,7 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const [failed, setFailed] = useState(false);
+  useEscapeToClose(onClose);
 
   useEffect(() => {
     let active = true;
@@ -796,5 +809,38 @@ function qualityModeText() {
   return "网站同款 AI";
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+/** 顶层错误边界：任一渲染异常时显示可读回退页，而非整屏白。 */
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("UI 渲染异常", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="error-boundary">
+          <h2>界面出错了</h2>
+          <p>请重启应用。若反复出现，可在日志目录导出诊断信息反馈。</p>
+          <pre>{this.state.error.message}</pre>
+          <button className="secondary" onClick={() => void window.upscaler.revealLogs()}>
+            打开日志目录
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
 

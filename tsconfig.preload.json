@@ -8,6 +8,7 @@
     "rootDir": "src/preload",
     "types": ["node", "electron"]
   },
-  "include": ["src/preload/**/*.ts"]
+  "include": ["src/preload/**/*.ts"],
+  "references": [{ "path": "./tsconfig.main.json" }]
 }
 

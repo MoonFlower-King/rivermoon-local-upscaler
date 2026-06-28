@@ -52,7 +52,7 @@ async function createWindow(): Promise<void> {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -69,10 +69,15 @@ async function createWindow(): Promise<void> {
 
   jobQueue = new JobQueue(() => mainWindow, await loadSavedJobs());
 
-  if (!app.isPackaged) {
-    await mainWindow.loadURL("http://127.0.0.1:5173");
-  } else {
-    await mainWindow.loadFile(path.join(app.getAppPath(), "dist", "renderer", "index.html"));
+  try {
+    if (!app.isPackaged) {
+      await mainWindow.loadURL("http://127.0.0.1:5173");
+    } else {
+      await mainWindow.loadFile(path.join(app.getAppPath(), "dist", "renderer", "index.html"));
+    }
+  } catch (error) {
+    log(`窗口加载失败：${error instanceof Error ? error.message : String(error)}`);
+    dialog.showErrorBox("RiverMoon 启动失败", "界面加载失败。请重启应用；若反复出现，请在关于页导出诊断日志反馈。");
   }
 
   mainWindow.on("closed", () => {

@@ -22,6 +22,9 @@ const MANAGED_URL = `http://127.0.0.1:${MANAGED_PORT}`;
 const READY_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 1500;
 
+/** ComfyUI 工作流节点 id：buildStandardPrompt、进度映射、取输出共用，改工作流时单点维护。 */
+const NODE = { LOAD: "1", MODEL: "2", UPSCALE: "3", SCALE: "4", SAVE: "5" } as const;
+
 type ComfyHistoryItem = {
   status?: {
     status_str?: string;
@@ -225,35 +228,35 @@ function buildStandardPrompt(
   filenamePrefix: string
 ): Record<string, unknown> {
   return {
-    "1": {
+    [NODE.LOAD]: {
       class_type: "LoadImage",
       inputs: { image: inputName }
     },
-    "2": {
+    [NODE.MODEL]: {
       class_type: "UpscaleModelLoader",
       inputs: { model_name: modelName }
     },
-    "3": {
+    [NODE.UPSCALE]: {
       class_type: "ImageUpscaleWithModel",
       inputs: {
-        upscale_model: ["2", 0],
-        image: ["1", 0]
+        upscale_model: [NODE.MODEL, 0],
+        image: [NODE.LOAD, 0]
       }
     },
-    "4": {
+    [NODE.SCALE]: {
       class_type: "ImageScale",
       inputs: {
-        image: ["3", 0],
+        image: [NODE.UPSCALE, 0],
         upscale_method: "lanczos",
         width: target.width,
         height: target.height,
         crop: "disabled"
       }
     },
-    "5": {
+    [NODE.SAVE]: {
       class_type: "SaveImage",
       inputs: {
-        images: ["4", 0],
+        images: [NODE.SCALE, 0],
         filename_prefix: filenamePrefix
       }
     }
@@ -453,21 +456,21 @@ async function pollPrompt(
 }
 
 function progressBaseForNode(node: string): number {
-  if (node === "3") return 20;
-  if (node === "4") return 78;
-  if (node === "5") return 88;
+  if (node === NODE.UPSCALE) return 20;
+  if (node === NODE.SCALE) return 78;
+  if (node === NODE.SAVE) return 88;
   return 15;
 }
 
 function progressSpanForNode(node: string): number {
-  if (node === "3") return 58;
-  if (node === "4") return 10;
-  if (node === "5") return 2;
+  if (node === NODE.UPSCALE) return 58;
+  if (node === NODE.SCALE) return 10;
+  if (node === NODE.SAVE) return 2;
   return 10;
 }
 
 function findSavedImage(history: ComfyHistoryItem): { filename: string; subfolder?: string; type?: string } {
-  const images = history.outputs?.["5"]?.images;
+  const images = history.outputs?.[NODE.SAVE]?.images;
   const first = images?.[0];
   if (!first?.filename) throw new Error("ComfyUI 已完成，但没有生成 SaveImage 输出。");
   return first;

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import type { UpscaleJob, UpscalerApi } from "../main/types.js";
 
 const api = {
   // Electron 32+ 移除了 File.path，拖拽文件改用 webUtils.getPathForFile 取真实路径。
@@ -20,12 +21,12 @@ const api = {
   clearFinished: () => ipcRenderer.invoke("jobs:clear-finished"),
   reveal: (filePath: string) => ipcRenderer.invoke("shell:reveal", filePath),
   getPreview: (filePath: string, maxSide?: number) => ipcRenderer.invoke("image:preview", filePath, maxSide),
-  onJobsUpdated: (callback: (jobs: unknown[]) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, jobs: unknown[]) => callback(jobs);
+  onJobsUpdated: (callback: (jobs: UpscaleJob[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, jobs: unknown[]) => callback(jobs as UpscaleJob[]);
     ipcRenderer.on("jobs:updated", listener);
     return () => ipcRenderer.removeListener("jobs:updated", listener);
   }
-};
+} satisfies UpscalerApi;
 
 contextBridge.exposeInMainWorld("upscaler", api);
 

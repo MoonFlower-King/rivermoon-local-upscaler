@@ -87,3 +87,29 @@ export type StartJobsPayload = {
   paths: string[];
   settings: UpscaleSettings;
 };
+
+/**
+ * preload 经 contextBridge 暴露到 window.upscaler 的 API 契约。
+ * preload（实现）与 renderer 的 global.d.ts（声明）共用此接口，避免两处定义漂移。
+ */
+export interface UpscalerApi {
+  getPathForFile(file: File): string;
+  getAssetStatus(): Promise<AssetStatus>;
+  probeHardware(force?: boolean): Promise<HardwareReport>;
+  getSettings(): Promise<UpscaleSettings>;
+  saveSettings(settings: UpscaleSettings): Promise<UpscaleSettings>;
+  getAppInfo(): Promise<AppInfo>;
+  exportLogs(): Promise<string | null>;
+  revealLogs(): Promise<void>;
+  selectFiles(): Promise<string[]>;
+  selectFolder(): Promise<string[]>;
+  selectOutputDirectory(): Promise<string | null>;
+  discoverFiles(paths: string[]): Promise<string[]>;
+  startJobs(payload: StartJobsPayload): Promise<UpscaleJob[]>;
+  listJobs(): Promise<UpscaleJob[]>;
+  cancelJob(id: string): Promise<UpscaleJob | null>;
+  clearFinished(): Promise<void>;
+  reveal(filePath: string): Promise<void>;
+  getPreview(filePath: string, maxSide?: number): Promise<string | null>;
+  onJobsUpdated(callback: (jobs: UpscaleJob[]) => void): () => void;
+}

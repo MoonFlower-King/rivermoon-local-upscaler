@@ -1,0 +1,39 @@
+RiverMoon 本地超分 —— 第三方组件与授权声明（NOTICE）
+================================================================
+
+本项目自身源代码以 MIT 许可发布（见 LICENSE）。
+但应用要正常运行，依赖以下第三方组件。这些组件**不随仓库提交**，而是在本地
+通过 scripts/prepare-comfyui-runtime.ps1 准备或由用户自行下载。它们各自的授权
+独立于本项目，**商业分发前必须逐项确认合规**。
+
+----------------------------------------------------------------
+1. ComfyUI
+   - 用途：内置推理引擎（resources/comfyui-runtime）
+   - 许可：GPL-3.0
+   - 说明：GPL 具有传染性。若你将 ComfyUI 与本应用一起打包分发，需评估是否
+     触发 GPL 的开源义务。仅在本地运行、不分发 ComfyUI 时风险较低。
+   - 项目主页：https://github.com/comfyanonymous/ComfyUI
+
+2. PyTorch + CUDA 运行库
+   - 用途：模型推理（python_embeded 内）
+   - 许可：PyTorch 为 BSD-3-Clause；NVIDIA CUDA 运行库受 NVIDIA 最终用户许可
+     协议（EULA）约束，再分发有额外限制。
+   - 说明：再分发 CUDA 运行库前请阅读 NVIDIA EULA。
+
+3. 4x-UltraSharp.pth（超分模型）
+   - 用途：默认超分模型（4x-UltraSharp）
+   - 许可：CC-BY-NC-SA 4.0 —— **仅限非商业用途，且衍生需同方式共享**
+   - 风险：⚠️ 这是当前最高的合规风险。任何商业化分发都不得包含该模型。
+     商用前必须替换为可商用授权的模型（例如自行确认授权的 Real-ESRGAN 等），
+     或取得 4x-UltraSharp 作者的商用授权。
+   - 来源：https://huggingface.co/lokCX/4x-Ultrasharp
+
+4. Electron / React / sharp 等 npm 依赖
+   - 许可：分别为 MIT / Apache-2.0 等宽松许可（详见 package-lock.json 及各包）
+   - sharp：Apache-2.0（内部捆绑 libvips，LGPL-3.0）
+
+----------------------------------------------------------------
+结论：
+  - 开源「源代码」到 GitHub：安全（本仓库不含上述第三方二进制/模型）。
+  - 分发「整包 exe」：必须先解决 ComfyUI(GPL) 与 4x-UltraSharp(非商业) 的授权。
+  - 商业分发：在解决上述两项前，禁止。

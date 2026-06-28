@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppInfo, AssetStatus, HardwareReport, ImageFormat, UpscaleJob, UpscaleSettings } from "../main/types";
 import "./styles.css";
@@ -529,8 +529,8 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
     let active = true;
     void (async () => {
       const [inputPreview, outputPreview] = await Promise.all([
-        window.upscaler.getPreview(job.inputPath, 2400),
-        job.outputPath ? window.upscaler.getPreview(job.outputPath, 2400) : Promise.resolve(null)
+        loadPreview(job.inputPath, 2400),
+        job.outputPath ? loadPreview(job.outputPath, 2400) : Promise.resolve(null)
       ]);
       if (!active) return;
       setBefore(inputPreview);
@@ -660,20 +660,100 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   );
 }
 
+// ── 预览加载基础设施 ──────────────────────────────────────────
+// 并发限流（避免大文件夹下数千张图同时 IPC→sharp 解码打爆主进程）
+// + 内存 LRU 缓存（重复打开/对比同一张图时 0 解码）。
+const PREVIEW_CONCURRENCY = 4;
+const PREVIEW_CACHE_MAX = 200;
+
+const previewCache = new Map<string, string>();
+let previewActive = 0;
+const previewWaiters: Array<() => void> = [];
+
+function acquirePreviewSlot(): Promise<void> {
+  if (previewActive < PREVIEW_CONCURRENCY) {
+    previewActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => previewWaiters.push(resolve));
+}
+
+function releasePreviewSlot(): void {
+  const next = previewWaiters.shift();
+  if (next) {
+    next(); // 槽位直接交棒给等待者，previewActive 维持不变
+  } else {
+    previewActive -= 1;
+  }
+}
+
+/** 经限流 + 缓存加载预览；失败（null）不缓存以便后续重试。 */
+async function loadPreview(path: string, maxSide: number): Promise<string | null> {
+  const key = `${path}:${maxSide}`;
+  const cached = previewCache.get(key);
+  if (cached !== undefined) {
+    previewCache.delete(key);
+    previewCache.set(key, cached); // 命中后挪到末尾（最近使用）
+    return cached;
+  }
+  await acquirePreviewSlot();
+  try {
+    const url = await window.upscaler.getPreview(path, maxSide);
+    if (url !== null) {
+      previewCache.set(key, url);
+      if (previewCache.size > PREVIEW_CACHE_MAX) {
+        const oldest = previewCache.keys().next().value;
+        if (oldest !== undefined) previewCache.delete(oldest);
+      }
+    }
+    return url;
+  } finally {
+    releasePreviewSlot();
+  }
+}
+
+/** 元素进入视口（含 200px 提前量）时返回 true，且只触发一次。 */
+function useInView<T extends Element>(): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, inView];
+}
+
 function Thumb({ path, max = 120 }: { path: string; max?: number }) {
+  const [ref, inView] = useInView<HTMLDivElement>();
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!inView) return;
     let active = true;
-    void window.upscaler.getPreview(path, max).then((url) => {
+    void loadPreview(path, max).then((url) => {
       if (active) setSrc(url);
     });
     return () => {
       active = false;
     };
-  }, [path, max]);
+  }, [path, max, inView]);
 
-  return <div className="thumb">{src ? <img src={src} alt="" /> : null}</div>;
+  return (
+    <div className="thumb" ref={ref}>
+      {src ? <img src={src} alt="" /> : null}
+    </div>
+  );
 }
 
 function BrandMark({ size = 24, framed = false }: { size?: number; framed?: boolean }) {

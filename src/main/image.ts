@@ -9,9 +9,11 @@ export function isSupportedImage(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-/** 生成缩放后的预览图（base64 data URL），用于渲染层前后对比，避免暴露 file:// 路径。 */
+/** 生成缩放后的预览图（base64 data URL），用于渲染层前后对比，避免暴露 file:// 路径。
+ *  .rotate() 按 EXIF 朝向自动转正，避免手机竖拍图在预览里侧躺。 */
 export async function previewDataUrl(filePath: string, maxSide = 1200): Promise<string> {
   const buffer = await sharp(filePath)
+    .rotate()
     .resize(maxSide, maxSide, { fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80 })
     .toBuffer();
@@ -23,14 +25,20 @@ export async function readImageDimensions(filePath: string): Promise<ImageDimens
   if (!metadata.width || !metadata.height) {
     throw new Error("无法读取图片尺寸，请确认文件是有效的 PNG、JPEG 或 WebP。");
   }
-  return { width: metadata.width, height: metadata.height };
+  // EXIF 朝向 5–8 表示图片被旋转 90°，存储的 width/height 与显示方向相反，需交换，
+  // 以与 ComfyUI LoadImage 的自动转正保持一致，保证目标尺寸正确。
+  const swap = typeof metadata.orientation === "number" && metadata.orientation >= 5;
+  return swap
+    ? { width: metadata.height, height: metadata.width }
+    : { width: metadata.width, height: metadata.height };
 }
 
 export function computeTargetDimensions(input: ImageDimensions, maxSide: number, scale: number): ImageDimensions {
   const longest = Math.max(input.width, input.height);
-  // maxSide<=0 表示不限制，直接按倍数放大；否则把长边限制在 maxSide 内（可选的防超大输出保险）。
+  // maxSide<=0 表示不限制，直接按倍数放大；否则把长边限制在 maxSide 内。
   const cap = Number.isFinite(maxSide) && maxSide > 0 ? maxSide / longest : Infinity;
-  const upscale = Math.min(scale, cap);
+  // 仅放大、绝不缩小：原图长边已超过 maxSide 时 cap<1，clamp 到 1 即保持原尺寸，不再压缩。
+  const upscale = Math.max(1, Math.min(scale, cap));
   return {
     width: Math.max(1, Math.round(input.width * upscale)),
     height: Math.max(1, Math.round(input.height * upscale))

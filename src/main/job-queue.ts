@@ -10,7 +10,7 @@ import {
 import { runComfyEngine } from "./comfy-engine.js";
 import { sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
-import { saveJobsSync } from "./jobs-store.js";
+import { saveJobs, saveJobsSync } from "./jobs-store.js";
 import type { StartJobsPayload, UpscaleJob, UpscaleSettings } from "./types.js";
 
 export class JobQueue {
@@ -18,6 +18,7 @@ export class JobQueue {
   private queue: string[] = [];
   private running = false;
   private abortControllers = new Map<string, AbortController>();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly getWindow: () => BrowserWindow | null,
@@ -177,17 +178,34 @@ export class JobQueue {
     }
   }
 
-  private emit(): void {
-    const jobs = this.getJobs();
-    this.getWindow()?.webContents.send("jobs:updated", jobs);
-    try {
-      saveJobsSync(jobs);
-    } catch (error) {
-      log(`任务记录保存失败 ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** 只广播最新任务给 UI（廉价）。进度高频更新走这里，不碰磁盘。 */
+  private emitToUi(): void {
+    this.getWindow()?.webContents.send("jobs:updated", this.getJobs());
   }
 
+  /** 节流落盘（最多 ~1 次/500ms，异步非阻塞）：把高频进度写盘合并，避免主线程卡顿与写放大。 */
+  private schedulePersist(): void {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void saveJobs(this.getJobs()).catch((error) => {
+        log(`任务记录保存失败 ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, 500);
+  }
+
+  /** UI 广播 + 节流落盘。常规更新（含进度）走这里。 */
+  private emit(): void {
+    this.emitToUi();
+    this.schedulePersist();
+  }
+
+  /** 立即同步落盘（原子写）。用于任务终态与应用退出前，保证不丢数据。 */
   flushSync(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     try {
       saveJobsSync(this.getJobs());
     } catch (error) {

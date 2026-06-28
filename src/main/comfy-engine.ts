@@ -85,6 +85,16 @@ export function comfyRuntimeStatus(): {
   };
 }
 
+/** 退出应用前调用：杀掉内置 ComfyUI 子进程，避免 python.exe 残留占用显存与端口。 */
+export function shutdownComfy(): void {
+  try {
+    managedProcess?.kill();
+  } catch {
+    // 进程可能已退出，忽略。
+  }
+  managedProcess = null;
+}
+
 export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
   assertQualityResources(options.settings);
 

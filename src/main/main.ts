@@ -11,7 +11,7 @@ import {
   listComfyModels,
   modelsRoot
 } from "./paths.js";
-import { comfyRuntimeStatus } from "./comfy-engine.js";
+import { comfyRuntimeStatus, shutdownComfy } from "./comfy-engine.js";
 import { JobQueue } from "./job-queue.js";
 import { getHardwareReport } from "./hardware-probe.js";
 import { loadSettings, saveSettings } from "./settings-store.js";
@@ -279,19 +279,42 @@ function applyContentSecurityPolicy(): void {
   });
 }
 
-app.whenReady().then(async () => {
-  log(`应用启动 v${app.getVersion()} · ${process.platform} ${process.arch}`);
-  applyContentSecurityPolicy();
-  registerIpc();
-  await createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void createWindow();
+// 单实例锁：避免双开争抢同一份 jobs.json 与 ComfyUI 端口（18188）。
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    // 用户再次启动时，聚焦已有窗口而不是开新实例。
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
-});
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+  // 退出前：最终同步落盘任务记录，并杀掉内置 ComfyUI 子进程，避免 python.exe 残留吃显存。
+  app.on("will-quit", () => {
+    try {
+      jobQueue?.flushSync();
+    } catch {
+      // 退出落盘失败不阻塞退出。
+    }
+    shutdownComfy();
+  });
+
+  app.whenReady().then(async () => {
+    log(`应用启动 v${app.getVersion()} · ${process.platform} ${process.arch}`);
+    applyContentSecurityPolicy();
+    registerIpc();
+    await createWindow();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void createWindow();
+      }
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}

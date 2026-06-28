@@ -28,14 +28,21 @@ export async function loadSavedJobs(): Promise<UpscaleJob[]> {
 
 export async function saveJobs(jobs: UpscaleJob[]): Promise<void> {
   const stableJobs = stableJobsForDisk(jobs);
-  await fs.mkdir(path.dirname(jobsPath()), { recursive: true });
-  await fs.writeFile(jobsPath(), JSON.stringify(stableJobs, null, 2), "utf8");
+  const target = jobsPath();
+  const tmp = `${target}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  // 原子写：先写临时文件再 rename 覆盖，避免写入途中崩溃导致 jobs.json 截断损坏。
+  await fs.writeFile(tmp, JSON.stringify(stableJobs, null, 2), "utf8");
+  await fs.rename(tmp, target);
 }
 
 export function saveJobsSync(jobs: UpscaleJob[]): void {
   const stableJobs = stableJobsForDisk(jobs);
-  fsSync.mkdirSync(path.dirname(jobsPath()), { recursive: true });
-  fsSync.writeFileSync(jobsPath(), JSON.stringify(stableJobs, null, 2), "utf8");
+  const target = jobsPath();
+  const tmp = `${target}.tmp`;
+  fsSync.mkdirSync(path.dirname(target), { recursive: true });
+  fsSync.writeFileSync(tmp, JSON.stringify(stableJobs, null, 2), "utf8");
+  fsSync.renameSync(tmp, target);
 }
 
 function stableJobsForDisk(jobs: UpscaleJob[]): UpscaleJob[] {

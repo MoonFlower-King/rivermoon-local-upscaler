@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell } from "electron";
 import path from "node:path";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
@@ -69,6 +69,11 @@ function configureLocalUserData(): void {
   }
 }
 
+/** 窗口底色跟随系统主题；acrylic 材质不可用（Win10 等）时它就是可见背景。 */
+function windowBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? "#1d1d20" : "#f0f2f5";
+}
+
 async function createWindow(): Promise<void> {
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, "icon.ico")
@@ -79,7 +84,9 @@ async function createWindow(): Promise<void> {
     height: 820,
     minWidth: 980,
     minHeight: 680,
-    backgroundColor: "#f4f6f8",
+    backgroundColor: windowBackgroundColor(),
+    // Win11 22H2+ 的系统级亚克力毛玻璃；不支持的系统自动忽略并回退纯色底。
+    backgroundMaterial: "acrylic",
     title: "RiverMoon 本地超分",
     icon: iconPath,
     webPreferences: {
@@ -353,6 +360,9 @@ if (!app.requestSingleInstanceLock()) {
     log(`应用启动 v${app.getVersion()} · ${process.platform} ${process.arch}`);
     applyContentSecurityPolicy();
     registerIpc();
+    nativeTheme.on("updated", () => {
+      mainWindow?.setBackgroundColor(windowBackgroundColor());
+    });
     await createWindow();
 
     app.on("activate", () => {

@@ -1,13 +1,8 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { DEFAULT_SETTINGS } from "../main/settings";
 import type { AppInfo, AssetStatus, HardwareReport, ImageFormat, UpscaleJob, UpscaleSettings } from "../main/types";
 import "./styles.css";
-
-const DEFAULT_SETTINGS: UpscaleSettings = {
-  outputFormat: "png",
-  outputDirectory: null,
-  maxSide: 4096
-};
 
 function App() {
   const [assetStatus, setAssetStatus] = useState<AssetStatus | null>(null);
@@ -22,11 +17,19 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [compareJob, setCompareJob] = useState<UpscaleJob | null>(null);
   const [now, setNow] = useState(Date.now());
+  const dragDepth = useRef(0);
 
   useEffect(() => {
     void init();
     const unsubscribe = window.upscaler.onJobsUpdated(setJobs);
     return unsubscribe;
+  }, []);
+
+  // 窗口重新聚焦时刷新资源与任务状态，替代旧的手动“刷新状态”按钮。
+  useEffect(() => {
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   // 设置变更后防抖持久化（跳过首屏加载阶段）。
@@ -55,9 +58,11 @@ function App() {
     setAppInfo(info);
     setSettings(saved);
     setSettingsLoaded(true);
+    // 启动即自动自检（命中缓存时瞬时返回），用户不再需要自己发现“检测”按钮。
+    void probeHardware(false);
   }
 
-  async function probeHardware(force = false) {
+  async function probeHardware(force: boolean) {
     setHardwareLoading(true);
     try {
       setHardware(await window.upscaler.probeHardware(force));
@@ -73,13 +78,11 @@ function App() {
   }
 
   async function addFiles() {
-    const files = await window.upscaler.selectFiles();
-    addPending(files);
+    addPending(await window.upscaler.selectFiles());
   }
 
   async function addFolder() {
-    const files = await window.upscaler.selectFolder();
-    addPending(files);
+    addPending(await window.upscaler.selectFolder());
   }
 
   async function selectOutputDirectory() {
@@ -92,17 +95,31 @@ function App() {
   }
 
   async function start() {
-    if (pendingPaths.length === 0) return;
-    if (!selectedChainReady) return;
-    // 设置已是精简后的合法值；主进程 startJobs 还会再 sanitize 一次。
+    if (pendingPaths.length === 0 || !chainReady) return;
     await window.upscaler.startJobs({ paths: pendingPaths, settings });
     setPendingPaths([]);
   }
 
-  async function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+  function retryJob(job: UpscaleJob) {
+    void window.upscaler.startJobs({ paths: [job.inputPath], settings: job.settings });
+  }
+
+  // 拖拽计数：dragleave 在进入子元素时也会触发，必须配对计数才能避免高亮闪烁。
+  function handleDragEnter(event: React.DragEvent) {
     event.preventDefault();
+    dragDepth.current += 1;
+    setIsDragging(true);
+  }
+
+  function handleDragLeave() {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDragging(false);
+  }
+
+  async function handleDrop(event: React.DragEvent) {
+    event.preventDefault();
+    dragDepth.current = 0;
     setIsDragging(false);
-    // Electron 32+ 不再提供 File.path，用 webUtils.getPathForFile 取真实路径。
     const paths = Array.from(event.dataTransfer.files)
       .map((file) => window.upscaler.getPathForFile(file))
       .filter((filePath): filePath is string => Boolean(filePath));
@@ -120,95 +137,481 @@ function App() {
       { queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 }
     );
   }, [jobs]);
-  const selectedQualityStatus = assetStatus?.qualityModes.standard;
-  const selectedChainReady = Boolean(selectedQualityStatus?.ok);
-  const startDisabled = pendingPaths.length === 0 || !selectedChainReady;
-  const startLabel =
-    pendingPaths.length === 0
-      ? "开始处理"
-      : !selectedChainReady
-        ? "当前档位资源缺失"
-        : `开始处理 ${pendingPaths.length} 个任务`;
+
+  const chainStatus = assetStatus?.qualityModes.standard;
+  const chainReady = Boolean(chainStatus?.ok);
+  const hasContent = pendingPaths.length > 0 || jobs.length > 0;
 
   return (
-    <main className="app">
+    <main
+      className="app"
+      onDragEnter={handleDragEnter}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={handleDragLeave}
+      onDrop={(event) => void handleDrop(event)}
+    >
       <header className="topbar">
         <div className="topbar-title">
           <span className="brand-mark">
-            <BrandMark size={32} framed />
+            <BrandMark size={30} framed />
           </span>
           <div>
             <h1>RiverMoon 本地超分</h1>
-            <p>本地运行网站同款 CUDA 高清链路，拖入图片即可处理。</p>
+            <p>本地 AI 高清放大，图片不离开这台电脑</p>
           </div>
         </div>
         <div className="topbar-actions">
+          <StatusPill
+            assetStatus={assetStatus}
+            hardware={hardware}
+            loading={hardwareLoading}
+            counts={counts}
+            onRetest={() => void probeHardware(true)}
+          />
           <button className="secondary" onClick={() => setShowAbout(true)}>
             关于
-          </button>
-          <button className="secondary" onClick={() => void refresh()}>
-            刷新状态
           </button>
         </div>
       </header>
 
       <div className="workspace">
         <section className="left">
-          <div
-            className={`dropzone ${isDragging ? "dragging" : ""}`}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={(event) => void handleDrop(event)}
-          >
-            <div className="drop-icon">
-              <BrandMark size={30} />
+          {hasContent ? (
+            <div className={`dropstrip ${isDragging ? "dragging" : ""}`}>
+              <span className="dropstrip-hint">
+                <BrandMark size={16} /> 拖入图片或文件夹，或
+              </span>
+              <div className="dropstrip-actions">
+                <button className="secondary sm" onClick={() => void addFiles()}>
+                  添加图片
+                </button>
+                <button className="secondary sm" onClick={() => void addFolder()}>
+                  添加文件夹
+                </button>
+              </div>
             </div>
-            <h2>把图片或文件夹拖到这里</h2>
-            <p>支持 PNG、JPEG、WebP。选择文件夹时会自动递归扫描。</p>
-            <div className="actions">
-              <button onClick={() => void addFiles()}>添加图片</button>
-              <button className="secondary" onClick={() => void addFolder()}>
-                添加文件夹
-              </button>
+          ) : (
+            <div className={`dropzone ${isDragging ? "dragging" : ""}`}>
+              <div className="drop-icon">
+                <BrandMark size={30} />
+              </div>
+              <h2>把图片或文件夹拖到这里</h2>
+              <p>支持 PNG、JPEG、WebP，选择文件夹时会自动递归扫描</p>
+              <div className="actions">
+                <button onClick={() => void addFiles()}>添加图片</button>
+                <button className="secondary" onClick={() => void addFolder()}>
+                  添加文件夹
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          <PendingList paths={pendingPaths} onRemove={(path) => setPendingPaths((items) => items.filter((item) => item !== path))} />
+          {pendingPaths.length > 0 ? (
+            <>
+              <section className="pending-bar">
+                <div className="pending-thumbs">
+                  {pendingPaths.slice(0, 5).map((path) => (
+                    <Thumb key={path} path={path} className="thumb-sm" />
+                  ))}
+                </div>
+                <span className="pending-count">已选 {pendingPaths.length} 张</span>
+                <button className="link-button" onClick={() => setPendingPaths([])}>
+                  清空
+                </button>
+                <span className="spacer" />
+                <button className="primary" disabled={!chainReady} onClick={() => void start()}>
+                  开始处理 {pendingPaths.length} 张
+                </button>
+              </section>
+              {!chainReady ? (
+                <p className="hint-warn">当前无法开始，缺少：{chainStatus?.missing.join("、") || "必需资源"}</p>
+              ) : null}
+              {pendingPaths.length <= 50 ? (
+                <PendingList
+                  paths={pendingPaths}
+                  onRemove={(path) => setPendingPaths((items) => items.filter((item) => item !== path))}
+                />
+              ) : null}
+            </>
+          ) : null}
 
-          <JobList jobs={jobs} now={now} onCompare={setCompareJob} />
+          <JobList jobs={jobs} now={now} onCompare={setCompareJob} onRetry={retryJob} />
         </section>
 
         <aside className="right">
-          <StatusPanel
-            assetStatus={assetStatus}
-            hardware={hardware}
-            hardwareLoading={hardwareLoading}
-            counts={counts}
-            onRetest={() => void probeHardware(true)}
-          />
           <SettingsPanel
             settings={settings}
+            settingsLoaded={settingsLoaded}
             status={assetStatus}
-            hardware={hardware}
             onChange={setSettings}
             onSelectOutputDirectory={() => void selectOutputDirectory()}
           />
-          <button className="primary start" disabled={startDisabled} onClick={() => void start()}>
-            {startLabel}
-          </button>
-          <button className="secondary" onClick={() => void window.upscaler.clearFinished()}>
-            清空已结束任务
-          </button>
         </aside>
       </div>
 
       {showAbout ? <AboutModal info={appInfo} hardware={hardware} onClose={() => setShowAbout(false)} /> : null}
       {compareJob ? <CompareModal job={compareJob} onClose={() => setCompareJob(null)} /> : null}
     </main>
+  );
+}
+
+function StatusPill({
+  assetStatus,
+  hardware,
+  loading,
+  counts,
+  onRetest
+}: {
+  assetStatus: AssetStatus | null;
+  hardware: HardwareReport | null;
+  loading: boolean;
+  counts: Record<UpscaleJob["status"], number>;
+  onRetest: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const assetsReady = Boolean(assetStatus?.qualityModes.standard.ok);
+  const checking = loading && !hardware;
+  const state: "busy" | "ok" | "warn" = checking
+    ? "busy"
+    : !assetsReady || (hardware != null && !hardware.ok)
+      ? "warn"
+      : hardware?.ok
+        ? "ok"
+        : "busy";
+  const label = checking
+    ? "检测中…"
+    : !assetsReady
+      ? "配置缺失"
+      : hardware == null
+        ? "检测中…"
+        : hardware.ok
+          ? "AI 引擎就绪"
+          : "CUDA 不可用";
+
+  return (
+    <div className="status-wrap">
+      <button className={`status-pill ${state}`} onClick={() => setOpen((value) => !value)}>
+        <span className="status-dot" aria-hidden="true" />
+        {label}
+      </button>
+      {open ? (
+        <>
+          <div className="pop-backdrop" onClick={() => setOpen(false)} />
+          <div className="status-pop">
+            <h3>运行状态</h3>
+            <dl className="kv">
+              <div>
+                <dt>处理资源</dt>
+                <dd>{assetsReady ? "完整" : `缺少 ${assetStatus?.missing.join("、") || "必需资源"}`}</dd>
+              </div>
+              <div>
+                <dt>CUDA</dt>
+                <dd>
+                  {hardware == null
+                    ? "尚未检测"
+                    : hardware.comfyuiCudaAvailable
+                      ? hardware.cudaDevices.join("、") || "可用"
+                      : "不可用"}
+                </dd>
+              </div>
+              <div>
+                <dt>任务</dt>
+                <dd>
+                  处理中 {counts.running} · 等待 {counts.queued}
+                </dd>
+              </div>
+            </dl>
+            {hardware && hardware.issues.length > 0 ? (
+              <ul className="status-issues">
+                {hardware.issues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+                {hardware.hints.map((hint) => (
+                  <li key={hint} className="hint">
+                    {hint}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <button className="secondary sm" disabled={loading} onClick={onRetest}>
+              {loading ? "检测中…" : "重新检测"}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function SettingsPanel({
+  settings,
+  settingsLoaded,
+  status,
+  onChange,
+  onSelectOutputDirectory
+}: {
+  settings: UpscaleSettings;
+  settingsLoaded: boolean;
+  status: AssetStatus | null;
+  onChange: (settings: UpscaleSettings) => void;
+  onSelectOutputDirectory: () => void;
+}) {
+  type SizeMode = "web" | "full" | "custom";
+  const deriveMode = (maxSide: number): SizeMode => (maxSide === 4096 ? "web" : maxSide === 0 ? "full" : "custom");
+  const [sizeMode, setSizeMode] = useState<SizeMode>(deriveMode(settings.maxSide));
+  const [customText, setCustomText] = useState(String(settings.maxSide || 8192));
+  const lastCustom = useRef(settings.maxSide > 0 && settings.maxSide !== 4096 ? settings.maxSide : 8192);
+
+  // 设置异步加载完成后按持久化值校准一次单选态。
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    setSizeMode(deriveMode(settings.maxSide));
+    if (settings.maxSide > 0 && settings.maxSide !== 4096) {
+      lastCustom.current = settings.maxSide;
+      setCustomText(String(settings.maxSide));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
+
+  function selectMode(mode: SizeMode) {
+    setSizeMode(mode);
+    if (mode === "web") onChange({ ...settings, maxSide: 4096 });
+    else if (mode === "full") onChange({ ...settings, maxSide: 0 });
+    else {
+      setCustomText(String(lastCustom.current));
+      onChange({ ...settings, maxSide: lastCustom.current });
+    }
+  }
+
+  function handleCustomChange(value: string) {
+    setCustomText(value);
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      lastCustom.current = Math.round(numeric);
+      onChange({ ...settings, maxSide: Math.round(numeric) });
+    }
+  }
+
+  const chainStatus = status?.qualityModes.standard;
+
+  return (
+    <section className="settings">
+      <h2>超分设置</h2>
+
+      <div className="chain-card">
+        <strong>网站同款 AI</strong>
+        <span>与 RiverMoon 网页版相同的处理效果，4x 模型放大</span>
+      </div>
+
+      {chainStatus && !chainStatus.ok ? (
+        <p className="quality-warning">当前缺少：{chainStatus.missing.join("、")}</p>
+      ) : null}
+
+      <div className="field">
+        <span className="field-label">输出格式</span>
+        <div className="seg" role="radiogroup" aria-label="输出格式">
+          {(["png", "jpg", "webp"] as ImageFormat[]).map((format) => (
+            <button
+              key={format}
+              className={settings.outputFormat === format ? "on" : ""}
+              onClick={() => onChange({ ...settings, outputFormat: format })}
+            >
+              {format === "png" ? "PNG" : format === "jpg" ? "JPEG" : "WebP"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="field">
+        <span className="field-label">输出尺寸</span>
+        <div className="radio-group">
+          <label className="radio-row">
+            <input type="radio" name="size-mode" checked={sizeMode === "web"} onChange={() => selectMode("web")} />
+            <span>
+              贴近网页版<small>长边不超过 4096</small>
+            </span>
+          </label>
+          <label className="radio-row">
+            <input type="radio" name="size-mode" checked={sizeMode === "full"} onChange={() => selectMode("full")} />
+            <span>
+              真实 4x<small>不限制尺寸，按模型全量放大</small>
+            </span>
+          </label>
+          <label className="radio-row">
+            <input type="radio" name="size-mode" checked={sizeMode === "custom"} onChange={() => selectMode("custom")} />
+            <span>
+              自定义长边
+              {sizeMode === "custom" ? (
+                <input
+                  className="custom-side"
+                  type="number"
+                  min={256}
+                  max={16384}
+                  value={customText}
+                  onClick={(event) => event.preventDefault()}
+                  onChange={(event) => handleCustomChange(event.target.value)}
+                  onBlur={() => setCustomText(String(settings.maxSide || lastCustom.current))}
+                  aria-label="自定义最大长边像素"
+                />
+              ) : null}
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div className="output-row">
+        <div>
+          <span className="field-label">输出目录</span>
+          <p>{settings.outputDirectory || "原图同级目录 / upscaled"}</p>
+        </div>
+        <button className="secondary sm" onClick={onSelectOutputDirectory}>
+          更改
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function PendingList({ paths, onRemove }: { paths: string[]; onRemove: (path: string) => void }) {
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h2>待处理图片</h2>
+        <span className="count-badge">{paths.length}</span>
+      </div>
+      <div className="pending-list">
+        {paths.map((path) => (
+          <div className="pending-item" key={path}>
+            <Thumb path={path} />
+            <span>{basename(path)}</span>
+            <button className="icon-button" aria-label={`移除 ${basename(path)}`} onClick={() => onRemove(path)}>
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function JobList({
+  jobs,
+  now,
+  onCompare,
+  onRetry
+}: {
+  jobs: UpscaleJob[];
+  now: number;
+  onCompare: (job: UpscaleJob) => void;
+  onRetry: (job: UpscaleJob) => void;
+}) {
+  const hasFinished = jobs.some(
+    (job) => job.status === "succeeded" || job.status === "failed" || job.status === "cancelled"
+  );
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h2>
+          任务记录 <span className="count-badge">{jobs.length}</span>
+        </h2>
+        {hasFinished ? (
+          <button className="link-button" onClick={() => void window.upscaler.clearFinished()}>
+            清空已结束
+          </button>
+        ) : null}
+      </div>
+      {jobs.length === 0 ? (
+        <div className="empty">还没有任务，拖入图片开始处理。</div>
+      ) : (
+        <div className="job-list">
+          {jobs.map((job) => (
+            <JobCard key={job.id} job={job} now={now} onCompare={onCompare} onRetry={onRetry} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function JobCard({
+  job,
+  now,
+  onCompare,
+  onRetry
+}: {
+  job: UpscaleJob;
+  now: number;
+  onCompare: (job: UpscaleJob) => void;
+  onRetry: (job: UpscaleJob) => void;
+}) {
+  const active = job.status === "running" || job.status === "queued";
+
+  return (
+    <article className={`job ${job.status}`}>
+      <div className="job-head">
+        <Thumb path={job.inputPath} />
+        <div className="job-title">
+          <h3>{job.fileName}</h3>
+          {active ? <p>{job.message}</p> : null}
+        </div>
+        <span className={`pill ${job.status}`}>
+          {statusText(job.status)}
+          {job.status === "running" ? ` ${job.progress}%` : ""}
+        </span>
+      </div>
+
+      {active ? (
+        <div
+          className={`progress ${job.status}`}
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={job.progress}
+          aria-label={`${job.fileName} 处理进度`}
+        >
+          <div style={{ width: `${job.progress}%` }} />
+        </div>
+      ) : null}
+
+      <div className="job-meta">
+        <span>
+          {job.dimensions ? `${job.dimensions.width}×${job.dimensions.height}` : "尺寸待读取"}
+          {" → "}
+          {job.targetDimensions ? `${job.targetDimensions.width}×${job.targetDimensions.height}` : "待计算"}
+        </span>
+        <span>{durationText(job, now)}</span>
+        {job.outputBytes != null ? <span>{formatBytes(job.outputBytes)}</span> : null}
+      </div>
+
+      {job.status === "failed" && job.error ? (
+        <div className="job-error">
+          <span>{job.error}</span>
+          <button className="secondary sm" onClick={() => onRetry(job)}>
+            重试
+          </button>
+        </div>
+      ) : null}
+
+      <div className="job-actions">
+        {active ? (
+          <button className="secondary sm" onClick={() => void window.upscaler.cancelJob(job.id)}>
+            取消
+          </button>
+        ) : null}
+        {job.outputPath && job.status === "succeeded" ? (
+          <>
+            <button className="secondary sm" onClick={() => onCompare(job)}>
+              对比
+            </button>
+            <button className="secondary sm" onClick={() => void window.upscaler.reveal(job.outputPath!)}>
+              打开位置
+            </button>
+          </>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -251,7 +654,7 @@ function AboutModal({
       <div className="modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>关于 RiverMoon 本地超分</h2>
-          <button className="icon-button" onClick={onClose}>
+          <button className="icon-button" aria-label="关闭" onClick={onClose}>
             ×
           </button>
         </div>
@@ -266,7 +669,7 @@ function AboutModal({
               <dd>{info?.electron ?? "—"}</dd>
             </div>
             <div>
-              <dt>网站同款 Runtime</dt>
+              <dt>AI 引擎</dt>
               <dd>{info?.comfyuiRuntimePath ? basename(info.comfyuiRuntimePath) : "未找到"}</dd>
             </div>
             <div>
@@ -322,191 +725,21 @@ function AboutModal({
   );
 }
 
-function StatusPanel({
-  assetStatus,
-  hardware,
-  hardwareLoading,
-  counts,
-  onRetest
-}: {
-  assetStatus: AssetStatus | null;
-  hardware: HardwareReport | null;
-  hardwareLoading: boolean;
-  counts: Record<UpscaleJob["status"], number>;
-  onRetest: () => void;
-}) {
-  const ready = Boolean(assetStatus?.qualityModes.standard.ok);
-  const checking = hardwareLoading && !hardware;
-  const verdict = checking ? "检测中" : ready ? "网站同款 AI 可用" : "配置缺失";
-
-  return (
-    <section className={`status-compact ${ready ? "ok" : "warn"}`}>
-      <div>
-        <span>运行状态</span>
-        <strong>{verdict}</strong>
-        <small>
-          CUDA {hardware?.comfyuiCudaAvailable ? "可用" : checking ? "检测中" : "待检测"} · 处理中 {counts.running} · 等待 {counts.queued}
-        </small>
-      </div>
-      <button className="secondary" disabled={hardwareLoading} onClick={onRetest}>
-        {hardwareLoading ? "检测中" : "检测"}
-      </button>
-      {!ready ? <p>{assetStatus?.missing.join("、") || "正在检查资源"}</p> : null}
-    </section>
-  );
-}
-
-function SettingsPanel({
-  settings,
-  status,
-  onChange,
-  onSelectOutputDirectory
-}: {
-  settings: UpscaleSettings;
-  status: AssetStatus | null;
-  hardware: HardwareReport | null;
-  onChange: (settings: UpscaleSettings) => void;
-  onSelectOutputDirectory: () => void;
-}) {
-  const selectedQualityStatus = status?.qualityModes.standard;
-
-  return (
-    <section className="settings">
-      <h2>超分设置</h2>
-      <p className="section-note">固定使用网站同款 AI：ComfyUI + 4x-UltraSharp.pth + CUDA。</p>
-
-      <div className="chain-card">
-        <strong>网站同款 AI</strong>
-        <span>旧网站 AI 按钮对应链路</span>
-      </div>
-
-      {selectedQualityStatus && !selectedQualityStatus.ok ? (
-        <p className="quality-warning">当前链路缺少：{selectedQualityStatus.missing.join("、")}</p>
-      ) : null}
-
-      <label>
-        输出格式
-        <select
-          value={settings.outputFormat}
-          onChange={(event) => onChange({ ...settings, outputFormat: event.target.value as ImageFormat })}
-        >
-          <option value="png">PNG</option>
-          <option value="jpg">JPEG</option>
-          <option value="webp">WebP</option>
-        </select>
-      </label>
-
-      <label>
-        最大长边（默认 4096；0 = 真实 4x）
-        <input
-          type="number"
-          min={0}
-          max={16384}
-          value={settings.maxSide}
-          onChange={(event) => onChange({ ...settings, maxSide: Number(event.target.value) })}
-        />
-      </label>
-      <p className="field-hint">要贴近旧网页效果，保留 4096；要真实 4x，填 0。</p>
-
-      <div className="output-row">
-        <div>
-          <span>输出目录</span>
-          <p>{settings.outputDirectory || "原图同级目录 / upscaled"}</p>
-        </div>
-        <button className="secondary" onClick={onSelectOutputDirectory}>
-          更改
-        </button>
-      </div>
-    </section>
-  );
-}
-function PendingList({ paths, onRemove }: { paths: string[]; onRemove: (path: string) => void }) {
-  if (paths.length === 0) return null;
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>待处理图片</h2>
-        <span>{paths.length}</span>
-      </div>
-      <div className="pending-list">
-        {paths.map((path) => (
-          <div className="pending-item" key={path}>
-            <Thumb path={path} />
-            <span>{basename(path)}</span>
-            <button className="icon-button" onClick={() => onRemove(path)}>
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function JobList({ jobs, now, onCompare }: { jobs: UpscaleJob[]; now: number; onCompare: (job: UpscaleJob) => void }) {
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>任务记录</h2>
-        <span>{jobs.length}</span>
-      </div>
-      {jobs.length === 0 ? (
-        <div className="empty">还没有任务。</div>
-      ) : (
-        <div className="job-list">
-          {jobs.map((job) => (
-            <article className={`job ${job.status}`} key={job.id}>
-              <div className="job-main">
-                <div>
-                  <h3>{job.fileName}</h3>
-                  <p>{job.message}</p>
-                  {job.error && <pre>{job.error}</pre>}
-                </div>
-                <strong>{statusText(job.status)}</strong>
-              </div>
-              <div className="progress">
-                <div style={{ width: `${job.progress}%` }} />
-              </div>
-              <div className="job-meta">
-                <span>
-                  {job.dimensions ? `${job.dimensions.width}x${job.dimensions.height}` : "未知尺寸"} {"->"}{" "}
-                  {job.targetDimensions ? `${job.targetDimensions.width}x${job.targetDimensions.height}` : "待计算"}
-                </span>
-                <span>{durationText(job, now)}</span>
-              </div>
-              <div className="job-actions">
-                {job.status === "running" || job.status === "queued" ? (
-                  <button className="secondary" onClick={() => void window.upscaler.cancelJob(job.id)}>
-                    取消
-                  </button>
-                ) : null}
-                {job.outputPath && job.status === "succeeded" ? (
-                  <>
-                    <button className="secondary" onClick={() => onCompare(job)}>
-                      对比
-                    </button>
-                    <button className="secondary" onClick={() => void window.upscaler.reveal(job.outputPath!)}>
-                      打开位置
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }) {
   const [before, setBefore] = useState<string | null>(null);
   const [after, setAfter] = useState<string | null>(null);
   const [position, setPosition] = useState(50);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [dragStart, setDragStart] = useState<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const [failed, setFailed] = useState(false);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const panDrag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const dividerDrag = useRef(false);
+  // wheel 回调是原生监听器，用 ref 镜像最新值避免闭包过期。
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  zoomRef.current = zoom;
+  panRef.current = pan;
   useEscapeToClose(onClose);
 
   useEffect(() => {
@@ -526,62 +759,112 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
     };
   }, [job.inputPath, job.outputPath]);
 
-  const ready = Boolean(before && after);
-  const clampedZoom = Math.max(1, Math.min(6, zoom));
-  const layerStyle = {
-    transform: `translate(${pan.x}px, ${pan.y}px) scale(${clampedZoom})`
-  };
-
-  function setZoomKeepingPan(nextZoom: number) {
-    const value = Math.max(1, Math.min(6, Number(nextZoom.toFixed(2))));
-    setZoom(value);
-    if (value === 1) setPan({ x: 0, y: 0 });
+  /** 以视口内 (cx, cy)（相对中心）为锚点缩放：锚点下的画面内容在缩放前后保持不动。 */
+  function zoomAt(delta: number, cx: number, cy: number) {
+    const current = zoomRef.current;
+    const next = clampNumber(Number((current + delta).toFixed(2)), 1, 6);
+    if (next === current) return;
+    if (next === 1) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    const view = viewRef.current;
+    const currentPan = panRef.current;
+    const limitX = view ? (view.clientWidth * next) / 2 : Infinity;
+    const limitY = view ? (view.clientHeight * next) / 2 : Infinity;
+    setZoom(next);
+    setPan({
+      x: clampNumber(cx - ((cx - currentPan.x) / current) * next, -limitX, limitX),
+      y: clampNumber(cy - ((cy - currentPan.y) / current) * next, -limitY, limitY)
+    });
   }
+
+  // React 17+ 的 onWheel 是被动监听、preventDefault 无效，必须挂原生非被动监听器。
+  useEffect(() => {
+    const el = viewRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      zoomAt(
+        event.deltaY < 0 ? 0.25 : -0.25,
+        event.clientX - rect.left - rect.width / 2,
+        event.clientY - rect.top - rect.height / 2
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failed, before, after]);
 
   function resetView() {
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }
 
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const delta = event.deltaY < 0 ? 0.25 : -0.25;
-    setZoomKeepingPan(clampedZoom + delta);
-  }
-
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (clampedZoom <= 1) return;
+    if (zoom <= 1) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    setDragStart({ x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y });
+    panDrag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    if (!dragStart) return;
-    const limitX = event.currentTarget.clientWidth * clampedZoom * 0.5;
-    const limitY = event.currentTarget.clientHeight * clampedZoom * 0.5;
+    const drag = panDrag.current;
+    if (!drag) return;
+    const limitX = (event.currentTarget.clientWidth * zoom) / 2;
+    const limitY = (event.currentTarget.clientHeight * zoom) / 2;
     setPan({
-      x: clampNumber(dragStart.panX + event.clientX - dragStart.x, -limitX, limitX),
-      y: clampNumber(dragStart.panY + event.clientY - dragStart.y, -limitY, limitY)
+      x: clampNumber(drag.panX + event.clientX - drag.x, -limitX, limitX),
+      y: clampNumber(drag.panY + event.clientY - drag.y, -limitY, limitY)
     });
   }
 
   function handlePointerEnd(event: React.PointerEvent<HTMLDivElement>) {
-    if (dragStart) {
+    if (panDrag.current) {
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {
         // Pointer capture may already be released by the browser.
       }
     }
-    setDragStart(null);
+    panDrag.current = null;
   }
+
+  function handleDividerDown(event: React.PointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dividerDrag.current = true;
+  }
+
+  function handleDividerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!dividerDrag.current) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const rect = view.getBoundingClientRect();
+    setPosition(clampNumber(((event.clientX - rect.left) / rect.width) * 100, 0, 100));
+  }
+
+  function handleDividerEnd(event: React.PointerEvent<HTMLDivElement>) {
+    if (dividerDrag.current) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already be released by the browser.
+      }
+    }
+    dividerDrag.current = false;
+  }
+
+  const ready = Boolean(before && after);
+  const layerStyle = { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal compare-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>前后对比 · {job.fileName}</h2>
-          <button className="icon-button" onClick={onClose}>
+          <button className="icon-button" aria-label="关闭" onClick={onClose}>
             ×
           </button>
         </div>
@@ -592,20 +875,20 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
         ) : (
           <div className="modal-body">
             <div className="compare-toolbar">
-              <button className="secondary" onClick={() => setZoomKeepingPan(clampedZoom - 0.5)}>
-                -
+              <button className="secondary sm" aria-label="缩小" onClick={() => zoomAt(-0.5, 0, 0)}>
+                −
               </button>
-              <span>{Math.round(clampedZoom * 100)}%</span>
-              <button className="secondary" onClick={() => setZoomKeepingPan(clampedZoom + 0.5)}>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button className="secondary sm" aria-label="放大" onClick={() => zoomAt(0.5, 0, 0)}>
                 +
               </button>
-              <button className="secondary" onClick={resetView}>
+              <button className="secondary sm" onClick={resetView}>
                 重置
               </button>
             </div>
             <div
-              className={`compare ${clampedZoom > 1 ? "zoomed" : ""}`}
-              onWheel={handleWheel}
+              ref={viewRef}
+              className={`compare ${zoom > 1 ? "zoomed" : ""}`}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerEnd}
@@ -621,6 +904,19 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
                 />
               </div>
               <div className="compare-divider" style={{ left: `${position}%` }} />
+              <div
+                className="compare-handle"
+                style={{ left: `${position}%` }}
+                role="slider"
+                aria-label="对比分割线"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(position)}
+                onPointerDown={handleDividerDown}
+                onPointerMove={handleDividerMove}
+                onPointerUp={handleDividerEnd}
+                onPointerCancel={handleDividerEnd}
+              />
               <span className="compare-tag left">处理前</span>
               <span className="compare-tag right">处理后</span>
             </div>
@@ -630,10 +926,11 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
               min={0}
               max={100}
               value={position}
+              aria-label="对比位置"
               onChange={(event) => setPosition(Number(event.target.value))}
             />
             <p className="hw-hint">
-              拖动滑块对比，滚轮或按钮缩放，放大后拖动画面 ·{" "}
+              拖动分割线或滑块对比，滚轮以鼠标为中心缩放，放大后拖动画面 ·{" "}
               {job.dimensions ? `${job.dimensions.width}×${job.dimensions.height}` : "?"} →{" "}
               {job.targetDimensions ? `${job.targetDimensions.width}×${job.targetDimensions.height}` : "?"}
             </p>
@@ -718,7 +1015,7 @@ function useInView<T extends Element>(): [React.RefObject<T | null>, boolean] {
   return [ref, inView];
 }
 
-function Thumb({ path, max = 120 }: { path: string; max?: number }) {
+function Thumb({ path, max = 120, className }: { path: string; max?: number; className?: string }) {
   const [ref, inView] = useInView<HTMLDivElement>();
   const [src, setSrc] = useState<string | null>(null);
 
@@ -734,7 +1031,7 @@ function Thumb({ path, max = 120 }: { path: string; max?: number }) {
   }, [path, max, inView]);
 
   return (
-    <div className="thumb" ref={ref}>
+    <div className={`thumb ${className ?? ""}`} ref={ref}>
       {src ? <img src={src} alt="" /> : null}
     </div>
   );
@@ -789,6 +1086,7 @@ function durationText(job: UpscaleJob, now: number): string {
           ? job.finishedAt - job.startedAt
           : null;
   if (duration == null) return "未计时";
+  if (job.status === "cancelled" && duration === 0) return "—";
   const prefix = job.status === "running" ? "已用" : "耗时";
   return `${prefix} ${formatDuration(duration)}`;
 }
@@ -801,6 +1099,12 @@ function formatDuration(durationMs: number): string {
   if (hours > 0) return `${hours}小时${minutes.toString().padStart(2, "0")}分${seconds.toString().padStart(2, "0")}秒`;
   if (minutes > 0) return `${minutes}分${seconds.toString().padStart(2, "0")}秒`;
   return `${seconds}秒`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${bytes}B`;
 }
 
 /** 顶层错误边界：任一渲染异常时显示可读回退页，而非整屏白。 */
@@ -837,4 +1141,3 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </ErrorBoundary>
 );
-

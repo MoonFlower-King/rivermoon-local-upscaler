@@ -724,6 +724,7 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   const [position, setPosition] = useState(50);
   // zoom 与 pan 合并成一个状态：所有变换都走函数式更新，原生 wheel 监听器不会闭包过期。
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
   const [failed, setFailed] = useState(false);
   const viewRef = useRef<HTMLDivElement | null>(null);
   const wheelCleanup = useRef<(() => void) | null>(null);
@@ -735,8 +736,8 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
     let active = true;
     void (async () => {
       const [inputPreview, outputPreview] = await Promise.all([
-        loadPreview(job.inputPath, 2400),
-        job.outputPath ? loadPreview(job.outputPath, 2400) : Promise.resolve(null)
+        loadPreview(job.inputPath, 3072),
+        job.outputPath ? loadPreview(job.outputPath, 3072) : Promise.resolve(null)
       ]);
       if (!active) return;
       setBefore(inputPreview);
@@ -748,11 +749,11 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
     };
   }, [job.inputPath, job.outputPath]);
 
-  /** 以视口内 (cx, cy)（相对中心）为锚点缩放：锚点下的画面内容在缩放前后保持不动。 */
-  const zoomAt = useCallback((delta: number, cx: number, cy: number) => {
+  /** 以视口内 (cx, cy)（相对中心）为锚点做乘法缩放：锚点下的画面内容在缩放前后保持不动。 */
+  const zoomBy = useCallback((factor: number, cx: number, cy: number) => {
     const el = viewRef.current;
     setView((current) => {
-      const next = clampNumber(Number((current.zoom + delta).toFixed(2)), 1, 6);
+      const next = clampNumber(Number((current.zoom * factor).toFixed(3)), 1, 8);
       if (next === current.zoom) return current;
       if (next === 1) return { zoom: 1, x: 0, y: 0 };
       const limitX = el ? (el.clientWidth * next) / 2 : Infinity;
@@ -776,16 +777,14 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
       const onWheel = (event: WheelEvent) => {
         event.preventDefault();
         const rect = node.getBoundingClientRect();
-        zoomAt(
-          event.deltaY < 0 ? 0.25 : -0.25,
-          event.clientX - rect.left - rect.width / 2,
-          event.clientY - rect.top - rect.height / 2
-        );
+        // 指数映射：触控板的小 delta 连续平滑，鼠标滚轮一格（±100）约 1.22 倍。
+        const factor = Math.exp(-event.deltaY * 0.002);
+        zoomBy(factor, event.clientX - rect.left - rect.width / 2, event.clientY - rect.top - rect.height / 2);
       };
       node.addEventListener("wheel", onWheel, { passive: false });
       wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
     },
-    [zoomAt]
+    [zoomBy]
   );
 
   function resetView() {
@@ -796,6 +795,7 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
     if (view.zoom <= 1) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     panDrag.current = { x: event.clientX, y: event.clientY, panX: view.x, panY: view.y };
+    setIsPanning(true);
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
@@ -825,6 +825,7 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
       }
     }
     panDrag.current = null;
+    setIsPanning(false);
   }
 
   function handleDividerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -853,7 +854,11 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   }
 
   const ready = Boolean(before && after);
-  const layerStyle = { transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` };
+  const layerStyle = {
+    transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
+    // 滚轮缩放用短过渡平滑档位跳变；拖动画面时关掉过渡避免拖尾。
+    transition: isPanning ? "none" : "transform 90ms ease-out"
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -871,11 +876,11 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
         ) : (
           <div className="modal-body">
             <div className="compare-toolbar">
-              <button className="secondary sm" aria-label="缩小" onClick={() => zoomAt(-0.5, 0, 0)}>
+              <button className="secondary sm" aria-label="缩小" onClick={() => zoomBy(1 / 1.3, 0, 0)}>
                 −
               </button>
               <span>{Math.round(view.zoom * 100)}%</span>
-              <button className="secondary sm" aria-label="放大" onClick={() => zoomAt(0.5, 0, 0)}>
+              <button className="secondary sm" aria-label="放大" onClick={() => zoomBy(1.3, 0, 0)}>
                 +
               </button>
               <button className="secondary sm" onClick={resetView}>

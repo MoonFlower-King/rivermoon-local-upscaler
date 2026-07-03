@@ -977,9 +977,28 @@ input[type="range"] {
   line-height: 1.5;
 }
 
-/* ── 对比弹窗 ── */
+/* ── 对比弹窗（全屏） ── */
 .compare-modal {
-  width: min(900px, 100%);
+  width: calc(100vw - 40px);
+  height: calc(100vh - 40px);
+  max-height: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.compare-modal .modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.compare-modal .empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
 }
 
 .compare-toolbar {
@@ -999,7 +1018,8 @@ input[type="range"] {
 .compare {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  flex: 1;
+  min-height: 0;
   border-radius: 12px;
   overflow: hidden;
   background: var(--control-bg);
@@ -1021,6 +1041,7 @@ input[type="range"] {
   inset: 0;
   transform-origin: center center;
   will-change: transform;
+  /* transition 由组件按交互态内联控制：滚轮缩放平滑、拖动画面即时。 */
 }
 
 .compare-img {
@@ -1087,7 +1108,6 @@ input[type="range"] {
 
 .compare-range {
   width: 100%;
-  margin-top: 12px;
 }
 
 /* ── 错误边界 ── */

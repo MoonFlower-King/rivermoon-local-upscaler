@@ -472,9 +472,7 @@ function JobList({ jobs, now, onCompare }: { jobs: UpscaleJob[]; now: number; on
                   {job.dimensions ? `${job.dimensions.width}x${job.dimensions.height}` : "未知尺寸"} {"->"}{" "}
                   {job.targetDimensions ? `${job.targetDimensions.width}x${job.targetDimensions.height}` : "待计算"}
                 </span>
-                <span>{qualityModeText()}</span>
                 <span>{durationText(job, now)}</span>
-                <span>{job.tileSize ? `分块 ${job.tileSize}` : ""}</span>
               </div>
               <div className="job-actions">
                 {job.status === "running" || job.status === "queued" ? (
@@ -803,10 +801,6 @@ function formatDuration(durationMs: number): string {
   if (hours > 0) return `${hours}小时${minutes.toString().padStart(2, "0")}分${seconds.toString().padStart(2, "0")}秒`;
   if (minutes > 0) return `${minutes}分${seconds.toString().padStart(2, "0")}秒`;
   return `${seconds}秒`;
-}
-
-function qualityModeText() {
-  return "网站同款 AI";
 }
 
 /** 顶层错误边界：任一渲染异常时显示可读回退页，而非整屏白。 */

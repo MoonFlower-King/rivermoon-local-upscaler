@@ -1,5 +1,7 @@
 import { BrowserWindow } from "electron";
 import crypto from "node:crypto";
+import fsSync from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import {
   computeTargetDimensions,
@@ -19,6 +21,7 @@ export class JobQueue {
   private running = false;
   private abortControllers = new Map<string, AbortController>();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private uiTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly getWindow: () => BrowserWindow | null,
@@ -44,7 +47,7 @@ export class JobQueue {
       created.push(job);
     }
 
-    this.emit();
+    this.emitNow();
     void this.drain();
     return created;
   }
@@ -59,7 +62,7 @@ export class JobQueue {
       job.durationMs = 0;
       job.message = "已取消";
       this.queue = this.queue.filter((queuedId) => queuedId !== id);
-      this.emit();
+      this.emitNow();
       return job;
     }
 
@@ -79,7 +82,7 @@ export class JobQueue {
         this.jobs.delete(id);
       }
     }
-    this.emit();
+    this.emitNow();
   }
 
   private async drain(): Promise<void> {
@@ -96,7 +99,7 @@ export class JobQueue {
       }
     } finally {
       this.running = false;
-      this.emit();
+      this.emitNow();
     }
   }
 
@@ -111,7 +114,7 @@ export class JobQueue {
       job.durationMs = null;
       job.progress = 5;
       job.message = "正在读取图片";
-      this.emit();
+      this.emitNow();
       log(`任务开始 ${job.fileName} format=${job.settings.outputFormat} maxSide=${job.settings.maxSide}`);
 
       const dimensions = await readImageDimensions(job.inputPath);
@@ -125,8 +128,7 @@ export class JobQueue {
       const outputPath = buildOutputPath(job.inputPath, outputDirectory, job.settings.outputFormat);
       job.outputPath = outputPath;
 
-      job.tileSize = 512;
-      job.message = "正在用网站同款 CUDA 链路处理";
+      job.message = "正在用 AI 引擎处理";
       job.progress = 18;
       this.emit();
       await runComfyEngine({
@@ -150,13 +152,18 @@ export class JobQueue {
       job.progress = Math.max(job.progress, 92);
       this.emit();
 
+      job.outputBytes = await fsp
+        .stat(outputPath)
+        .then((stat) => stat.size)
+        .catch(() => null);
+
       job.status = "succeeded";
       job.finishedAt = Date.now();
       job.durationMs = elapsedDuration(job);
       job.progress = 100;
       job.message = "已完成";
       job.error = null;
-      this.emit();
+      this.emitNow();
       log(`任务完成 ${job.fileName} 用时 ${job.finishedAt - (job.startedAt ?? job.finishedAt)}ms -> ${outputPath}`);
     } catch (error) {
       job.status = controller.signal.aborted ? "cancelled" : "failed";
@@ -165,7 +172,7 @@ export class JobQueue {
       job.progress = 100;
       job.message = job.status === "cancelled" ? "已取消" : "处理失败";
       job.error = formatJobError(error);
-      this.emit();
+      this.emitNow();
       log(`任务${job.status === "cancelled" ? "取消" : "失败"} ${job.fileName} ${job.error ?? ""}`);
     } finally {
       this.abortControllers.delete(job.id);
@@ -173,8 +180,25 @@ export class JobQueue {
     }
   }
 
-  /** 只广播最新任务给 UI（廉价）。进度高频更新走这里，不碰磁盘。 */
+  /** 高频进度更新合并到 ~100ms 一次广播，避免每 +1% 就全量序列化 300 条任务过 IPC。 */
   private emitToUi(): void {
+    if (this.uiTimer) return;
+    this.uiTimer = setTimeout(() => {
+      this.uiTimer = null;
+      this.sendJobsToUi();
+    }, 100);
+  }
+
+  /** 立即广播（状态跃迁走这里，保证 UI 秒级反馈），并吞掉未触发的节流定时器。 */
+  private emitToUiNow(): void {
+    if (this.uiTimer) {
+      clearTimeout(this.uiTimer);
+      this.uiTimer = null;
+    }
+    this.sendJobsToUi();
+  }
+
+  private sendJobsToUi(): void {
     this.getWindow()?.webContents.send("jobs:updated", this.getJobs());
   }
 
@@ -189,9 +213,15 @@ export class JobQueue {
     }, 500);
   }
 
-  /** UI 广播 + 节流落盘。常规更新（含进度）走这里。 */
+  /** 节流 UI 广播 + 节流落盘。高频进度更新走这里。 */
   private emit(): void {
     this.emitToUi();
+    this.schedulePersist();
+  }
+
+  /** 即时 UI 广播 + 节流落盘。任务创建/状态跃迁走这里。 */
+  private emitNow(): void {
+    this.emitToUiNow();
     this.schedulePersist();
   }
 
@@ -226,7 +256,7 @@ function createJob(inputPath: string, settings: UpscaleSettings): UpscaleJob {
     error: null,
     dimensions: null,
     targetDimensions: null,
-    tileSize: null
+    outputBytes: null
   };
 }
 
@@ -238,10 +268,22 @@ function elapsedDuration(job: UpscaleJob): number {
 function buildOutputPath(inputPath: string, outputDirectory: string, format: UpscaleSettings["outputFormat"]): string {
   const parsed = path.parse(inputPath);
   const ext = outputExtension(format);
-  return path.join(outputDirectory, `${parsed.name}_upscaled.${ext}`);
+  return resolveCollisionFreePath(path.join(outputDirectory, `${parsed.name}_upscaled`), ext);
+}
+
+/** 同名不同扩展名的输入、或重复处理同一文件时不静默覆盖旧输出，追加 _2/_3… 序号。 */
+export function resolveCollisionFreePath(
+  basePath: string,
+  ext: string,
+  exists: (candidate: string) => boolean = fsSync.existsSync
+): string {
+  let candidate = `${basePath}.${ext}`;
+  for (let index = 2; exists(candidate); index += 1) {
+    candidate = `${basePath}_${index}.${ext}`;
+  }
+  return candidate;
 }
 
 function formatJobError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return `${message} 当前版本只保留网站同款 AI 链路，请确认内置 ComfyUI Runtime 和 4x-UltraSharp.pth 完整。`;
+  return error instanceof Error ? error.message : String(error);
 }

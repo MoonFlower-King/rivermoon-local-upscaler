@@ -23,6 +23,31 @@ let mainWindow: BrowserWindow | null = null;
 let jobQueue: JobQueue;
 let lastHardwareReport: HardwareReport | null = null;
 
+/**
+ * 渲染层可引用的磁盘路径白名单（纵深防御）：
+ * 只有经文件对话框、拖拽发现、任务记录产生的路径才允许预览 / 定位 / 发起任务，
+ * 即使渲染层被攻破也无法借 IPC 读取任意文件。
+ */
+const allowedPaths = new Set<string>();
+
+function allowPaths(paths: Iterable<string>): void {
+  for (const item of paths) allowedPaths.add(path.normalize(item));
+}
+
+function isAllowedPath(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  const normalized = path.normalize(value);
+  if (allowedPaths.has(normalized)) return true;
+  // 任务记录里的输入/输出路径天然可信（主进程自己生成过），覆盖重启后恢复的历史任务。
+  return (
+    jobQueue?.getJobs().some(
+      (job) =>
+        path.normalize(job.inputPath) === normalized ||
+        (job.outputPath !== null && path.normalize(job.outputPath) === normalized)
+    ) ?? false
+  );
+}
+
 configureLocalUserData();
 
 const preloadPath = path.join(app.getAppPath(), "dist", "preload", "index.js");
@@ -31,8 +56,17 @@ function configureLocalUserData(): void {
   const userDataRoot = app.isPackaged
     ? path.join(path.dirname(process.execPath), "user-data")
     : path.join(process.cwd(), ".local-user-data");
-  fsSync.mkdirSync(userDataRoot, { recursive: true });
-  app.setPath("userData", userDataRoot);
+  try {
+    fsSync.mkdirSync(userDataRoot, { recursive: true });
+    // 写探针：目录可能存在但不可写（比如装进 Program Files），
+    // 那样 setPath 后所有持久化都会失败，不如回退 Electron 默认 %APPDATA%。
+    const probe = path.join(userDataRoot, ".write-probe");
+    fsSync.writeFileSync(probe, "");
+    fsSync.rmSync(probe, { force: true });
+    app.setPath("userData", userDataRoot);
+  } catch {
+    // 保持默认 userData，路径问题绝不阻塞启动。
+  }
 }
 
 async function createWindow(): Promise<void> {
@@ -129,7 +163,9 @@ function registerIpc(): void {
           filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
         });
     if (result.canceled) return [];
-    return discoverImageFiles(result.filePaths);
+    const files = await discoverImageFiles(result.filePaths);
+    allowPaths(files);
+    return files;
   });
 
   ipcMain.handle("dialog:select-folder", async () => {
@@ -143,7 +179,9 @@ function registerIpc(): void {
           properties: ["openDirectory"]
         });
     if (result.canceled) return [];
-    return discoverImageFiles(result.filePaths);
+    const files = await discoverImageFiles(result.filePaths);
+    allowPaths(files);
+    return files;
   });
 
   ipcMain.handle("dialog:select-output-directory", async () => {
@@ -160,11 +198,15 @@ function registerIpc(): void {
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle("files:discover", async (_event, paths: unknown) => discoverImageFiles(toStringArray(paths)));
+  ipcMain.handle("files:discover", async (_event, paths: unknown) => {
+    const files = await discoverImageFiles(toStringArray(paths));
+    allowPaths(files);
+    return files;
+  });
 
   ipcMain.handle("jobs:start", (_event, payload: unknown) => {
     const raw = (payload && typeof payload === "object" ? payload : {}) as Partial<StartJobsPayload>;
-    const paths = toStringArray(raw.paths);
+    const paths = toStringArray(raw.paths).filter(isAllowedPath);
     if (paths.length === 0) return [];
     return jobQueue.startJobs({ paths, settings: raw.settings as StartJobsPayload["settings"] });
   });
@@ -172,12 +214,13 @@ function registerIpc(): void {
   ipcMain.handle("jobs:cancel", (_event, id: string) => jobQueue.cancelJob(id));
   ipcMain.handle("jobs:clear-finished", () => jobQueue.clearFinished());
 
-  ipcMain.handle("shell:reveal", async (_event, filePath: string) => {
-    if (!filePath) return;
+  ipcMain.handle("shell:reveal", async (_event, filePath: unknown) => {
+    if (!isAllowedPath(filePath)) return;
     await shell.showItemInFolder(filePath);
   });
 
-  ipcMain.handle("image:preview", async (_event, filePath: string, maxSide?: number) => {
+  ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number) => {
+    if (!isAllowedPath(filePath)) return null;
     try {
       return await previewDataUrl(filePath, maxSide ?? 1200);
     } catch {

@@ -7,6 +7,8 @@ import { log } from "./logger.js";
 import type { GpuInfo, HardwareReport } from "./types.js";
 
 const GPU_QUERY_TIMEOUT_MS = 8000;
+/** CUDA 自检要冷启动 python + torch，比 WMI 查询慢得多，超时给足。 */
+const CUDA_PROBE_TIMEOUT_MS = 15_000;
 
 /**
  * 带缓存的硬件检测。ComfyUI Runtime / 模型指纹未变时直接返回上次结果；
@@ -131,7 +133,7 @@ async function probeComfyCuda(): Promise<{ ok: boolean; devices: string[]; issue
     child.stderr.on("data", (chunk: Buffer) => {
       errorOutput += chunk.toString("utf8");
     });
-    const timer = setTimeout(() => child.kill(), 15000);
+    const timer = setTimeout(() => child.kill(), CUDA_PROBE_TIMEOUT_MS);
     child.on("error", () => {
       clearTimeout(timer);
       resolve({

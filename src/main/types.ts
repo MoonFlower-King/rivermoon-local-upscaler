@@ -38,7 +38,8 @@ export type UpscaleJob = {
   error: string | null;
   dimensions: ImageDimensions | null;
   targetDimensions: ImageDimensions | null;
-  tileSize: number | null;
+  /** 输出文件大小（字节）；任务成功后 stat 得到，供 UI 展示。 */
+  outputBytes: number | null;
 };
 
 export type AssetStatus = {

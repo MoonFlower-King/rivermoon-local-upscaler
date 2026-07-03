@@ -7,7 +7,7 @@ import {
   outputExtension,
   readImageDimensions
 } from "./image.js";
-import { runComfyEngine } from "./comfy-engine.js";
+import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
 import { saveJobs, saveJobsSync } from "./jobs-store.js";
@@ -65,6 +65,8 @@ export class JobQueue {
 
     if (job.status === "running") {
       this.abortControllers.get(id)?.abort();
+      // 让 ComfyUI 立即中断 GPU 计算并清掉队列里的该任务，而不是任由它在后台算完。
+      void interruptComfy();
       return job;
     }
 

@@ -15,51 +15,30 @@ import {
 } from "./paths.js";
 import { log, logsRoot } from "./logger.js";
 import { DEFAULT_MODEL } from "./settings.js";
+import {
+  ComfyExecutionError,
+  NODE,
+  assertHistoryHealthy,
+  buildStandardPrompt,
+  progressBaseForNode,
+  progressFromState,
+  progressSpanForNode,
+  type ComfyHistoryItem,
+  type ComfyProgressPayload,
+  type ComfyPromptResponse
+} from "./comfy-protocol.js";
 import type { ImageDimensions, ImageFormat, UpscaleSettings } from "./types.js";
 
 const MANAGED_PORT = 18188;
 const MANAGED_URL = `http://127.0.0.1:${MANAGED_PORT}`;
 const READY_TIMEOUT_MS = 180_000;
+/** 回退轮询模式下查询 history 的间隔。 */
 const POLL_INTERVAL_MS = 1500;
-
-/** ComfyUI 工作流节点 id：buildStandardPrompt、进度映射、取输出共用，改工作流时单点维护。 */
-const NODE = { LOAD: "1", MODEL: "2", UPSCALE: "3", SCALE: "4", SAVE: "5" } as const;
-
-type ComfyHistoryItem = {
-  status?: {
-    status_str?: string;
-    completed?: boolean;
-    messages?: unknown[];
-  };
-  outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }>;
-};
-
-type ComfyPromptResponse = {
-  prompt_id?: string;
-  node_errors?: unknown;
-};
-
-type ComfyProgressPayload = {
-  type?: string;
-  data?: {
-    prompt_id?: string;
-    node?: string | null;
-    value?: number;
-    max?: number;
-    nodes?: Record<
-      string,
-      {
-        value?: number;
-        max?: number;
-        state?: string;
-        node_id?: string;
-        prompt_id?: string;
-      }
-    >;
-    exception_message?: string;
-    exception_type?: string;
-  };
-};
+/** websocket 正常时，history 只作为漏事件的双保险，低频即可。 */
+const WS_HISTORY_POLL_MS = 5000;
+/** 单个任务等待执行完成的总超时（超大图 + 排队的极端情况兜底）。 */
+const EXECUTION_TIMEOUT_MS = 60 * 60 * 1000;
+const INTERRUPT_TIMEOUT_MS = 3000;
 
 export type ComfyRunOptions = {
   inputPath: string;
@@ -74,6 +53,9 @@ export type ComfyRunOptions = {
 
 let managedProcess: ChildProcess | null = null;
 let startupPromise: Promise<string> | null = null;
+/** 当前正在执行的任务上下文，供 interruptComfy 精确打断。串行队列保证同一时刻至多一个。 */
+let activeComfyUrl: string | null = null;
+let activePromptId: string | null = null;
 
 export function comfyRuntimeStatus(): {
   root: string;
@@ -99,10 +81,36 @@ export function shutdownComfy(): void {
   managedProcess = null;
 }
 
+/**
+ * 取消运行中的任务时调用：让 ComfyUI 立即中断当前执行并从队列删除该 prompt，
+ * 立刻释放 GPU，而不是任由废弃任务在后台算完整张图。失败静默（ComfyUI 可能未在运行）。
+ */
+export async function interruptComfy(): Promise<void> {
+  const url = activeComfyUrl ?? MANAGED_URL;
+  const promptId = activePromptId;
+  try {
+    await fetch(`${url}/interrupt`, { method: "POST", signal: AbortSignal.timeout(INTERRUPT_TIMEOUT_MS) });
+  } catch {
+    // ComfyUI 未运行或已停止时无需处理。
+  }
+  if (!promptId) return;
+  try {
+    await fetch(`${url}/queue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delete: [promptId] }),
+      signal: AbortSignal.timeout(INTERRUPT_TIMEOUT_MS)
+    });
+  } catch {
+    // 同上。
+  }
+}
+
 export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
   assertQualityResources();
 
   const comfyUrl = await ensureComfyReady(options.signal);
+  activeComfyUrl = comfyUrl;
   options.onProgress?.(8);
 
   const jobId = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
@@ -115,6 +123,7 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
 
     options.onProgress?.(12);
     const promptId = await submitPrompt(comfyUrl, prompt, clientId, options.signal);
+    activePromptId = promptId;
     log(`ComfyUI 任务已提交 prompt=${promptId} model=${DEFAULT_MODEL}`);
 
     const history = await waitForPrompt(comfyUrl, promptId, clientId, options.signal, options.onProgress);
@@ -122,8 +131,13 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
     const sourcePath = resolveComfyOutputPath(comfyOutput);
     await fsp.mkdir(path.dirname(options.outputPath), { recursive: true });
     await copyOrConvertOutput(sourcePath, options.outputPath, options.format);
+    // 回收 ComfyUI output 侧的原始产物，否则每个任务都会在 runtime 目录泄漏一张全尺寸图。
+    await fsp.rm(sourcePath, { force: true }).catch(() => {
+      // 回收失败不影响主流程。
+    });
     options.onProgress?.(100);
   } finally {
+    activePromptId = null;
     // 清理复制进 ComfyUI input 目录的临时输入文件，避免磁盘占用无限增长。
     await fsp.rm(copiedInputPath, { force: true }).catch(() => {
       // 清理失败不影响主流程。
@@ -175,7 +189,17 @@ async function startManagedComfy(signal: AbortSignal): Promise<string> {
   managedProcess = child;
   log(`启动内置 ComfyUI runtime pid=${child.pid ?? "-"} log=${logPath}`);
 
+  // 用对象属性记录退出状态：闭包内赋值不受 TS 控制流窄化影响，就绪轮询里能即时读到。
+  const exitState = { exited: false, code: null as number | null };
+
+  child.on("error", (error) => {
+    exitState.exited = true;
+    log(`内置 ComfyUI 启动失败 ${error.message}`);
+  });
+
   child.on("exit", (code) => {
+    exitState.exited = true;
+    exitState.code = code ?? null;
     log(`内置 ComfyUI 已退出 code=${code ?? "null"}`);
     if (managedProcess === child) managedProcess = null;
     try {
@@ -193,6 +217,13 @@ async function startManagedComfy(signal: AbortSignal): Promise<string> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < READY_TIMEOUT_MS) {
     if (signal.aborted) throw new Error("任务已取消。");
+    if (exitState.exited) {
+      signal.removeEventListener("abort", abort);
+      throw new Error(
+        `内置 ComfyUI 启动后立即退出（code=${exitState.code ?? "未知"}）。` +
+          `常见原因：端口 ${MANAGED_PORT} 被其他程序占用，或运行时文件损坏。启动日志：${logPath}`
+      );
+    }
     if (await isReady(MANAGED_URL)) {
       signal.removeEventListener("abort", abort);
       return MANAGED_URL;
@@ -221,48 +252,6 @@ async function copyInputToComfy(inputPath: string, jobId: string): Promise<strin
   return name;
 }
 
-function buildStandardPrompt(
-  inputName: string,
-  modelName: string,
-  target: ImageDimensions,
-  filenamePrefix: string
-): Record<string, unknown> {
-  return {
-    [NODE.LOAD]: {
-      class_type: "LoadImage",
-      inputs: { image: inputName }
-    },
-    [NODE.MODEL]: {
-      class_type: "UpscaleModelLoader",
-      inputs: { model_name: modelName }
-    },
-    [NODE.UPSCALE]: {
-      class_type: "ImageUpscaleWithModel",
-      inputs: {
-        upscale_model: [NODE.MODEL, 0],
-        image: [NODE.LOAD, 0]
-      }
-    },
-    [NODE.SCALE]: {
-      class_type: "ImageScale",
-      inputs: {
-        image: [NODE.UPSCALE, 0],
-        upscale_method: "lanczos",
-        width: target.width,
-        height: target.height,
-        crop: "disabled"
-      }
-    },
-    [NODE.SAVE]: {
-      class_type: "SaveImage",
-      inputs: {
-        images: [NODE.SCALE, 0],
-        filename_prefix: filenamePrefix
-      }
-    }
-  };
-}
-
 async function submitPrompt(
   url: string,
   prompt: Record<string, unknown>,
@@ -277,7 +266,12 @@ async function submitPrompt(
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`ComfyUI 提交失败：${text}`);
-  const parsed = JSON.parse(text) as ComfyPromptResponse;
+  let parsed: ComfyPromptResponse;
+  try {
+    parsed = JSON.parse(text) as ComfyPromptResponse;
+  } catch {
+    throw new Error(`ComfyUI 返回了无法解析的响应：${text.slice(0, 200)}`);
+  }
   if (parsed.node_errors && Object.keys(parsed.node_errors as Record<string, unknown>).length > 0) {
     throw new Error(`ComfyUI 工作流校验失败：${JSON.stringify(parsed.node_errors)}`);
   }
@@ -295,6 +289,9 @@ async function waitForPrompt(
   try {
     return await waitForPromptWebsocket(url, promptId, clientId, signal, onProgress);
   } catch (error) {
+    // 只有「连接层」错误才值得回退轮询：
+    // 执行失败（ComfyExecutionError）和用户取消原样上抛，避免失败任务在轮询里空等。
+    if (error instanceof ComfyExecutionError || signal.aborted) throw error;
     log(`ComfyUI websocket 进度不可用，回退轮询 ${error instanceof Error ? error.message : String(error)}`);
     return pollPrompt(url, promptId, signal, onProgress);
   }
@@ -310,59 +307,67 @@ async function waitForPromptWebsocket(
   const wsUrl = `${url.replace(/^http/, "ws")}/ws?clientId=${encodeURIComponent(clientId)}`;
   const socket = new WebSocket(wsUrl);
   let currentNode = "";
-  let settled = false;
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("websocket 等待超时")), 60 * 60 * 1000);
-    const historyTimer = setInterval(() => {
-      void fetchHistory(url, promptId, signal)
-        .then((history) => {
-          if (history.status?.completed) void finish(history);
-        })
-        .catch(() => {
-          // History is absent while the prompt is still queued or executing.
-        });
-    }, POLL_INTERVAL_MS);
-    const cleanup = () => {
-      clearTimeout(timeout);
-      clearInterval(historyTimer);
-      signal.removeEventListener("abort", abort);
+    // 所有退出路径（完成/失败/取消/超时）统一经 settle：先跑全部 disposer 再定案，
+    // 物理上杜绝任何一条路径漏清理定时器、socket 或事件监听。
+    let settled = false;
+    let finishing = false;
+    const disposers: Array<() => void> = [];
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      for (const dispose of disposers) {
+        try {
+          dispose();
+        } catch {
+          // 清理失败忽略。
+        }
+      }
+      action();
+    };
+
+    const timeout = setTimeout(() => settle(() => reject(new Error("websocket 等待超时"))), EXECUTION_TIMEOUT_MS);
+    disposers.push(() => clearTimeout(timeout));
+
+    disposers.push(() => {
       try {
         socket.close();
       } catch {
         // Ignore closed sockets.
       }
-    };
-    const finish = async (knownHistory?: ComfyHistoryItem) => {
-      if (settled) return;
-      settled = true;
-      try {
-        onProgress?.(92);
-        const history = knownHistory ?? (await fetchHistory(url, promptId, signal));
-        cleanup();
-        resolve(history);
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    };
-    const abort = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error("任务已取消。"));
-    };
+    });
+
+    const abort = () => settle(() => reject(new Error("任务已取消。")));
     signal.addEventListener("abort", abort, { once: true });
+    disposers.push(() => signal.removeEventListener("abort", abort));
+
+    const finish = (knownHistory?: ComfyHistoryItem) => {
+      if (settled || finishing) return;
+      finishing = true;
+      onProgress?.(92);
+      void (knownHistory ? Promise.resolve(knownHistory) : fetchHistory(url, promptId, signal))
+        .then((history) => settle(() => resolve(history)))
+        .catch((error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))));
+    };
+
+    // websocket 可能漏事件；低频轮询 history 作为完成信号的双保险。
+    const historyTimer = setInterval(() => {
+      void fetchHistory(url, promptId, signal)
+        .then((history) => {
+          if (history.status?.completed) finish(history);
+        })
+        .catch((error) => {
+          // 执行失败要立刻上抛；其余情况是任务仍在排队/执行、history 尚不存在，继续等。
+          if (error instanceof ComfyExecutionError) settle(() => reject(error));
+        });
+    }, WS_HISTORY_POLL_MS);
+    disposers.push(() => clearInterval(historyTimer));
 
     socket.addEventListener("open", () => onProgress?.(12));
-    socket.addEventListener("error", () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error("websocket 连接失败"));
-    });
+    socket.addEventListener("error", () => settle(() => reject(new Error("websocket 连接失败"))));
     socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return;
+      if (settled || typeof event.data !== "string") return;
       let payload: ComfyProgressPayload;
       try {
         payload = JSON.parse(event.data) as ComfyProgressPayload;
@@ -374,7 +379,7 @@ async function waitForPromptWebsocket(
 
       if (payload.type === "executing") {
         currentNode = data.node ?? "";
-        if (data.node == null) void finish();
+        if (data.node == null) finish();
       } else if (payload.type === "progress_state" && data.nodes) {
         const nextProgress = progressFromState(data.nodes, promptId);
         if (nextProgress != null) onProgress?.(nextProgress);
@@ -383,38 +388,14 @@ async function waitForPromptWebsocket(
         const nodeSpan = progressSpanForNode(currentNode);
         onProgress?.(Math.min(90, nodeBase + Math.round((data.value / data.max) * nodeSpan)));
       } else if (payload.type === "execution_error") {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(new Error(data.exception_message || data.exception_type || "ComfyUI 执行失败"));
+        settle(() =>
+          reject(new ComfyExecutionError(data.exception_message || data.exception_type || "ComfyUI 执行失败"))
+        );
       } else if (payload.type === "execution_success") {
-        void finish();
+        finish();
       }
     });
   });
-}
-
-function progressFromState(
-  nodes: NonNullable<ComfyProgressPayload["data"]>["nodes"],
-  promptId: string
-): number | null {
-  if (!nodes) return null;
-  let best: number | null = null;
-
-  for (const [key, state] of Object.entries(nodes)) {
-    if (state.prompt_id && state.prompt_id !== promptId) continue;
-    const node = state.node_id || key;
-    const value = typeof state.value === "number" ? state.value : null;
-    const max = typeof state.max === "number" && state.max > 0 ? state.max : null;
-    const ratio = state.state === "finished" ? 1 : value != null && max ? value / max : state.state === "running" ? 0 : null;
-    if (ratio == null) continue;
-    const nodeBase = progressBaseForNode(node);
-    const nodeSpan = progressSpanForNode(node);
-    const nodeProgress = Math.min(90, nodeBase + Math.round(Math.max(0, Math.min(1, ratio)) * nodeSpan));
-    best = best == null ? nodeProgress : Math.max(best, nodeProgress);
-  }
-
-  return best;
 }
 
 async function fetchHistory(url: string, promptId: string, signal: AbortSignal): Promise<ComfyHistoryItem> {
@@ -423,10 +404,7 @@ async function fetchHistory(url: string, promptId: string, signal: AbortSignal):
   const history = (await response.json()) as Record<string, ComfyHistoryItem>;
   const item = history[promptId];
   if (!item) throw new Error("ComfyUI 已完成，但没有找到任务历史记录。");
-  const status = item.status?.status_str ?? "";
-  if (item.status?.completed && status.toLowerCase() !== "success" && status.toLowerCase() !== "completed") {
-    throw new Error(`ComfyUI 执行失败：${JSON.stringify(item.status)}`);
-  }
+  assertHistoryHealthy(item);
   return item;
 }
 
@@ -437,7 +415,7 @@ async function pollPrompt(
   onProgress?: (percent: number) => void
 ): Promise<ComfyHistoryItem> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 60 * 60 * 1000) {
+  while (Date.now() - startedAt < EXECUTION_TIMEOUT_MS) {
     if (signal.aborted) throw new Error("任务已取消。");
     try {
       const item = await fetchHistory(url, promptId, signal);
@@ -445,28 +423,15 @@ async function pollPrompt(
         onProgress?.(92);
         return item;
       }
-    } catch {
-      // History is absent while the prompt is still queued or executing.
+    } catch (error) {
+      // 执行失败立刻上抛；其余情况是 history 尚不存在（仍在排队/执行），继续轮询。
+      if (error instanceof ComfyExecutionError) throw error;
     }
 
     onProgress?.(20);
     await delay(POLL_INTERVAL_MS);
   }
   throw new Error("ComfyUI 执行超时。");
-}
-
-function progressBaseForNode(node: string): number {
-  if (node === NODE.UPSCALE) return 20;
-  if (node === NODE.SCALE) return 78;
-  if (node === NODE.SAVE) return 88;
-  return 15;
-}
-
-function progressSpanForNode(node: string): number {
-  if (node === NODE.UPSCALE) return 58;
-  if (node === NODE.SCALE) return 10;
-  if (node === NODE.SAVE) return 2;
-  return 10;
 }
 
 function findSavedImage(history: ComfyHistoryItem): { filename: string; subfolder?: string; type?: string } {

@@ -13,6 +13,8 @@
     "dist": "npm run build && electron-builder --win nsis",
     "dist:dir": "npm run build && electron-builder --win dir",
     "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -23,6 +25,7 @@
     "sharp": "^0.34.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.2",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
@@ -30,9 +33,13 @@
     "concurrently": "^9.1.2",
     "electron": "^42.5.2",
     "electron-builder": "^25.1.8",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.62.1",
     "vite": "^6.0.7",
     "vitest": "^4.1.9",
     "wait-on": "^8.0.2"

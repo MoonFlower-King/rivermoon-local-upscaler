@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_SETTINGS } from "../main/settings";
 import type { AppInfo, AssetStatus, HardwareReport, ImageFormat, UpscaleJob, UpscaleSettings } from "../main/types";
@@ -23,6 +23,8 @@ function App() {
     void init();
     const unsubscribe = window.upscaler.onJobsUpdated(setJobs);
     return unsubscribe;
+    // init 只应在挂载时执行一次，依赖数组刻意留空。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 窗口重新聚焦时刷新资源与任务状态，替代旧的手动“刷新状态”按钮。
@@ -239,13 +241,14 @@ function App() {
         </section>
 
         <aside className="right">
-          <SettingsPanel
-            settings={settings}
-            settingsLoaded={settingsLoaded}
-            status={assetStatus}
-            onChange={setSettings}
-            onSelectOutputDirectory={() => void selectOutputDirectory()}
-          />
+          {settingsLoaded ? (
+            <SettingsPanel
+              settings={settings}
+              status={assetStatus}
+              onChange={setSettings}
+              onSelectOutputDirectory={() => void selectOutputDirectory()}
+            />
+          ) : null}
         </aside>
       </div>
 
@@ -344,35 +347,25 @@ function StatusPill({
   );
 }
 
+/** 只在设置加载完成后挂载（见 App），初始态可以直接从持久化值派生，无需校准 effect。 */
 function SettingsPanel({
   settings,
-  settingsLoaded,
   status,
   onChange,
   onSelectOutputDirectory
 }: {
   settings: UpscaleSettings;
-  settingsLoaded: boolean;
   status: AssetStatus | null;
   onChange: (settings: UpscaleSettings) => void;
   onSelectOutputDirectory: () => void;
 }) {
   type SizeMode = "web" | "full" | "custom";
   const deriveMode = (maxSide: number): SizeMode => (maxSide === 4096 ? "web" : maxSide === 0 ? "full" : "custom");
-  const [sizeMode, setSizeMode] = useState<SizeMode>(deriveMode(settings.maxSide));
-  const [customText, setCustomText] = useState(String(settings.maxSide || 8192));
+  const [sizeMode, setSizeMode] = useState<SizeMode>(() => deriveMode(settings.maxSide));
+  const [customText, setCustomText] = useState(() =>
+    String(settings.maxSide > 0 && settings.maxSide !== 4096 ? settings.maxSide : 8192)
+  );
   const lastCustom = useRef(settings.maxSide > 0 && settings.maxSide !== 4096 ? settings.maxSide : 8192);
-
-  // 设置异步加载完成后按持久化值校准一次单选态。
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    setSizeMode(deriveMode(settings.maxSide));
-    if (settings.maxSide > 0 && settings.maxSide !== 4096) {
-      lastCustom.current = settings.maxSide;
-      setCustomText(String(settings.maxSide));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoaded]);
 
   function selectMode(mode: SizeMode) {
     setSizeMode(mode);
@@ -729,17 +722,13 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   const [before, setBefore] = useState<string | null>(null);
   const [after, setAfter] = useState<string | null>(null);
   const [position, setPosition] = useState(50);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  // zoom 与 pan 合并成一个状态：所有变换都走函数式更新，原生 wheel 监听器不会闭包过期。
+  const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [failed, setFailed] = useState(false);
-  const viewRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<HTMLDivElement | null>(null);
+  const wheelCleanup = useRef<(() => void) | null>(null);
   const panDrag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const dividerDrag = useRef(false);
-  // wheel 回调是原生监听器，用 ref 镜像最新值避免闭包过期。
-  const zoomRef = useRef(zoom);
-  const panRef = useRef(pan);
-  zoomRef.current = zoom;
-  panRef.current = pan;
   useEscapeToClose(onClose);
 
   useEffect(() => {
@@ -760,63 +749,70 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   }, [job.inputPath, job.outputPath]);
 
   /** 以视口内 (cx, cy)（相对中心）为锚点缩放：锚点下的画面内容在缩放前后保持不动。 */
-  function zoomAt(delta: number, cx: number, cy: number) {
-    const current = zoomRef.current;
-    const next = clampNumber(Number((current + delta).toFixed(2)), 1, 6);
-    if (next === current) return;
-    if (next === 1) {
-      setZoom(1);
-      setPan({ x: 0, y: 0 });
-      return;
-    }
-    const view = viewRef.current;
-    const currentPan = panRef.current;
-    const limitX = view ? (view.clientWidth * next) / 2 : Infinity;
-    const limitY = view ? (view.clientHeight * next) / 2 : Infinity;
-    setZoom(next);
-    setPan({
-      x: clampNumber(cx - ((cx - currentPan.x) / current) * next, -limitX, limitX),
-      y: clampNumber(cy - ((cy - currentPan.y) / current) * next, -limitY, limitY)
-    });
-  }
-
-  // React 17+ 的 onWheel 是被动监听、preventDefault 无效，必须挂原生非被动监听器。
-  useEffect(() => {
+  const zoomAt = useCallback((delta: number, cx: number, cy: number) => {
     const el = viewRef.current;
-    if (!el) return;
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      zoomAt(
-        event.deltaY < 0 ? 0.25 : -0.25,
-        event.clientX - rect.left - rect.width / 2,
-        event.clientY - rect.top - rect.height / 2
-      );
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [failed, before, after]);
+    setView((current) => {
+      const next = clampNumber(Number((current.zoom + delta).toFixed(2)), 1, 6);
+      if (next === current.zoom) return current;
+      if (next === 1) return { zoom: 1, x: 0, y: 0 };
+      const limitX = el ? (el.clientWidth * next) / 2 : Infinity;
+      const limitY = el ? (el.clientHeight * next) / 2 : Infinity;
+      return {
+        zoom: next,
+        x: clampNumber(cx - ((cx - current.x) / current.zoom) * next, -limitX, limitX),
+        y: clampNumber(cy - ((cy - current.y) / current.zoom) * next, -limitY, limitY)
+      };
+    });
+  }, []);
+
+  // React 17+ 的 onWheel 是被动监听、preventDefault 无效；
+  // 用 callback ref 在元素挂载/卸载时挂原生非被动监听器。
+  const setViewEl = useCallback(
+    (node: HTMLDivElement | null) => {
+      wheelCleanup.current?.();
+      wheelCleanup.current = null;
+      viewRef.current = node;
+      if (!node) return;
+      const onWheel = (event: WheelEvent) => {
+        event.preventDefault();
+        const rect = node.getBoundingClientRect();
+        zoomAt(
+          event.deltaY < 0 ? 0.25 : -0.25,
+          event.clientX - rect.left - rect.width / 2,
+          event.clientY - rect.top - rect.height / 2
+        );
+      };
+      node.addEventListener("wheel", onWheel, { passive: false });
+      wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
+    },
+    [zoomAt]
+  );
 
   function resetView() {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setView({ zoom: 1, x: 0, y: 0 });
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (zoom <= 1) return;
+    if (view.zoom <= 1) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    panDrag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+    panDrag.current = { x: event.clientX, y: event.clientY, panX: view.x, panY: view.y };
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
     const drag = panDrag.current;
     if (!drag) return;
-    const limitX = (event.currentTarget.clientWidth * zoom) / 2;
-    const limitY = (event.currentTarget.clientHeight * zoom) / 2;
-    setPan({
-      x: clampNumber(drag.panX + event.clientX - drag.x, -limitX, limitX),
-      y: clampNumber(drag.panY + event.clientY - drag.y, -limitY, limitY)
+    const width = event.currentTarget.clientWidth;
+    const height = event.currentTarget.clientHeight;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+    setView((current) => {
+      const limitX = (width * current.zoom) / 2;
+      const limitY = (height * current.zoom) / 2;
+      return {
+        ...current,
+        x: clampNumber(drag.panX + clientX - drag.x, -limitX, limitX),
+        y: clampNumber(drag.panY + clientY - drag.y, -limitY, limitY)
+      };
     });
   }
 
@@ -857,7 +853,7 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   }
 
   const ready = Boolean(before && after);
-  const layerStyle = { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` };
+  const layerStyle = { transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -878,7 +874,7 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
               <button className="secondary sm" aria-label="缩小" onClick={() => zoomAt(-0.5, 0, 0)}>
                 −
               </button>
-              <span>{Math.round(zoom * 100)}%</span>
+              <span>{Math.round(view.zoom * 100)}%</span>
               <button className="secondary sm" aria-label="放大" onClick={() => zoomAt(0.5, 0, 0)}>
                 +
               </button>
@@ -887,8 +883,8 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
               </button>
             </div>
             <div
-              ref={viewRef}
-              className={`compare ${zoom > 1 ? "zoomed" : ""}`}
+              ref={setViewEl}
+              className={`compare ${view.zoom > 1 ? "zoomed" : ""}`}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerEnd}

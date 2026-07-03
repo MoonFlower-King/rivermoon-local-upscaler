@@ -356,7 +356,7 @@ if (!app.requestSingleInstanceLock()) {
     shutdownComfy();
   });
 
-  app.whenReady().then(async () => {
+  void app.whenReady().then(async () => {
     log(`应用启动 v${app.getVersion()} · ${process.platform} ${process.arch}`);
     applyContentSecurityPolicy();
     registerIpc();

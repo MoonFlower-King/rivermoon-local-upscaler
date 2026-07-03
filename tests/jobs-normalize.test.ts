@@ -26,6 +26,26 @@ describe("normalizeJob", () => {
     expect(job?.message).toContain("已停止");
   });
 
+  it("丢弃旧字段 tileSize，outputBytes 规整为非负数或 null", () => {
+    const job = normalizeJob({
+      id: "a",
+      inputPath: "x",
+      fileName: "x.png",
+      status: "succeeded",
+      createdAt: 1,
+      tileSize: 512,
+      outputBytes: -5
+    })!;
+    expect("tileSize" in job).toBe(false);
+    expect(job.outputBytes).toBe(0);
+
+    const job2 = normalizeJob({ id: "a", inputPath: "x", fileName: "x.png", status: "succeeded", createdAt: 1, outputBytes: 1234 })!;
+    expect(job2.outputBytes).toBe(1234);
+
+    const job3 = normalizeJob({ id: "a", inputPath: "x", fileName: "x.png", status: "succeeded", createdAt: 1 })!;
+    expect(job3.outputBytes).toBeNull();
+  });
+
   it("保留终态任务并补算 durationMs 与合法 settings", () => {
     const job = normalizeJob({
       id: "a",

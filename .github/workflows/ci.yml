@@ -27,6 +27,9 @@ jobs:
       - name: 类型检查
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
       - name: 构建（主进程 + 渲染层）
         run: npm run build
 

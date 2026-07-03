@@ -1,14 +1,9 @@
 import { BrowserWindow } from "electron";
 import crypto from "node:crypto";
-import fsSync from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import {
-  computeTargetDimensions,
-  ensureDirectory,
-  outputExtension,
-  readImageDimensions
-} from "./image.js";
+import { computeTargetDimensions, ensureDirectory, readImageDimensions } from "./image.js";
+import { buildOutputPath } from "./output-path.js";
 import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
@@ -263,25 +258,6 @@ function createJob(inputPath: string, settings: UpscaleSettings): UpscaleJob {
 function elapsedDuration(job: UpscaleJob): number {
   if (!job.startedAt || !job.finishedAt) return 0;
   return Math.max(0, job.finishedAt - job.startedAt);
-}
-
-function buildOutputPath(inputPath: string, outputDirectory: string, format: UpscaleSettings["outputFormat"]): string {
-  const parsed = path.parse(inputPath);
-  const ext = outputExtension(format);
-  return resolveCollisionFreePath(path.join(outputDirectory, `${parsed.name}_upscaled`), ext);
-}
-
-/** 同名不同扩展名的输入、或重复处理同一文件时不静默覆盖旧输出，追加 _2/_3… 序号。 */
-export function resolveCollisionFreePath(
-  basePath: string,
-  ext: string,
-  exists: (candidate: string) => boolean = fsSync.existsSync
-): string {
-  let candidate = `${basePath}.${ext}`;
-  for (let index = 2; exists(candidate); index += 1) {
-    candidate = `${basePath}_${index}.${ext}`;
-  }
-  return candidate;
 }
 
 function formatJobError(error: unknown): string {

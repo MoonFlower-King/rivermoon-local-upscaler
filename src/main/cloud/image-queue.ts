@@ -68,7 +68,8 @@ export class ImageTaskQueue {
       message: "排队中",
       error: null,
       needsTopup: false,
-      outputPaths: []
+      outputPaths: [],
+      outputSizes: []
     };
     this.tasks.set(task.id, task);
     this.queue.push(task.id);
@@ -129,6 +130,14 @@ export class ImageTaskQueue {
       if (!key) throw new RelayError("auth", "未连接中转站账户，请先在设置里填写 API Key。");
 
       task.outputPaths = await runImageGeneration(task.params, key, controller.signal);
+      task.outputSizes = await Promise.all(
+        task.outputPaths.map((outputPath) =>
+          fs
+            .stat(outputPath)
+            .then((stat) => stat.size)
+            .catch(() => 0)
+        )
+      );
       task.status = "succeeded";
       task.message = "已完成";
       task.error = null;

@@ -113,6 +113,8 @@ export type ImageGenTask = {
   needsTopup: boolean;
   /** 落盘到资产库的图片绝对路径。 */
   outputPaths: string[];
+  /** 与 outputPaths 逐项对齐的文件大小（字节）；stat 失败为 0。 */
+  outputSizes: number[];
 };
 
 /** 超分模型下载状态（安装包不含权重，用户界面内自主下载）。 */

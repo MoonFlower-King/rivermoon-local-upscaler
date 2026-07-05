@@ -46,10 +46,14 @@ describe("normalizeImageTask", () => {
     expect(task.finishedAt).toBe(999);
   });
 
-  it("终态任务保留输出路径，过滤非法项", () => {
-    const task = normalizeImageTask({ ...base, status: "succeeded", outputPaths: ["a.png", 3, ""] })!;
+  it("终态任务保留输出路径，过滤非法项；outputSizes 与 outputPaths 对齐", () => {
+    const task = normalizeImageTask({ ...base, status: "succeeded", outputPaths: ["a.png", 3, ""], outputSizes: [123] })!;
     expect(task.status).toBe("succeeded");
     expect(task.outputPaths).toEqual(["a.png"]);
+    expect(task.outputSizes).toEqual([123]);
+
+    const noSizes = normalizeImageTask({ ...base, status: "succeeded", outputPaths: ["a.png", "b.png"] })!;
+    expect(noSizes.outputSizes).toEqual([0, 0]);
   });
 
   it("缺少必要字段返回 null", () => {

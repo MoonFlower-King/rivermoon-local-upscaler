@@ -163,3 +163,20 @@ function setState(patch: Partial<ModelDownloadState>): void {
   state = { ...state, ...patch };
   notify?.(state);
 }
+
+/** 启动时清理上次强退残留的 .download 临时文件（正在下载中的不受影响——此函数只在启动早期调用）。 */
+export async function cleanupStaleDownloads(): Promise<void> {
+  for (const dir of [comfyUpscaleModelsRoot(), userModelsRoot()]) {
+    try {
+      const entries = await fsp.readdir(dir);
+      for (const entry of entries) {
+        if (entry.endsWith(".download")) {
+          await fsp.rm(path.join(dir, entry), { force: true });
+          log(`已清理残留下载临时文件 ${entry}`);
+        }
+      }
+    } catch {
+      // 目录不存在等情况忽略。
+    }
+  }
+}

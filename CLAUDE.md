@@ -2,13 +2,9 @@
 
 ## 项目一句话
 
-`RiverMoon 本地超分` 是一个 Windows 本地图片超分桌面工具。当前最新版只保留网站同款 AI 链路：
+`RiverMoon AI 工作台`：Windows 桌面应用，四模块侧栏——**图片超分**（本地 ComfyUI/CUDA，免费离线，图片不上传）、**AI 生图**（rivermoon7.com 中转站，消耗用户 API Key）、**资产库**、**设置**（Key 管理）。
 
-```text
-ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth
-```
-
-应用不连接 RiverMoon 服务器，不使用 NewAPI Key，图片不上传云端。
+商业逻辑：本地超分免费引流 → 生图消耗中转站 Key → 余额不足引导充值。
 
 ## 工作目录
 
@@ -16,7 +12,7 @@ ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth
 D:\rivermoon-local-upscaler
 ```
 
-请只在这个目录继续处理。历史的旧 Web 项目目录只作为网站链路参考，不参与当前桌面版开发。
+任务真相源：`docs/TASKBOARD.md`（接手先读）+ `docs/APP_V2_DESIGN.md`（设计定稿）。
 
 ## 当前交付产物
 
@@ -24,103 +20,81 @@ D:\rivermoon-local-upscaler
 D:\rivermoon-local-upscaler\release\win-unpacked\RiverMoon 本地超分.exe
 ```
 
-交付时复制整个目录：
+交付时复制整个 `release\win-unpacked\` 目录，不能只复制 exe。
+
+## 当前产品决策（v2）
+
+- 四模块侧栏工作台；苹果风 vibrancy 双主题（prefers-color-scheme + Win11 acrylic）。
+- 超分永远本地、免费、不上传（隐私承诺只对超分模块）。
+- 生图走 rivermoon7.com（NewAPI），模型列表由 `/v1/models` 动态驱动；Key 用 safeStorage 加密，渲染层只见掩码。
+- **安装包不含 .pth 模型权重**（4x-UltraSharp 为 CC-BY-NC-SA 非商业授权）：用户在超分模块引导卡里自主下载，SHA256 校验后落位。
+- 渲染层零网络（CSP connect-src 'self'）；所有云调用在主进程；IPC 路径白名单。
+- AI 视频与 Midjourney 延后 v2（当前渠道未开）；充值页 URL 暂跳首页（待正式地址）。
+
+## 超分链路
 
 ```text
-D:\rivermoon-local-upscaler\release\win-unpacked\
+LoadImage -> UpscaleModelLoader(4x-UltraSharp.pth) -> ImageUpscaleWithModel
+-> ImageScale(lanczos, target) -> SaveImage
 ```
 
-不能只复制 exe。
-
-## 当前产品决策
-
-- 只保留 `网站同款 AI`。
-- 移除/隐藏 Pro、SUPIR、轻量 Vulkan/NCNN 入口。
-- 打开软件直接进入工作区。
-- 资源与 CUDA 检查只作为右侧小卡片，不占首屏主流程。
-- 任务记录必须持久化，最新任务在最前。
-- 每个任务必须显示计时：运行中显示“已用”，结束后显示“耗时”，并保存到任务记录。
-- 进度必须来自 ComfyUI 真实事件或 history 状态，不按时间伪造。
-- 对比弹窗支持缩放和拖动画面。
-
-## 网站同款链路
-
-当前桌面版工作流：
-
-```text
-LoadImage
--> UpscaleModelLoader(4x-UltraSharp.pth)
--> ImageUpscaleWithModel
--> ImageScale(Lanczos, target width/height)
--> SaveImage
-```
-
-默认最大长边是 `4096`，贴近网页端历史输出。用户填 `0` 时按真实 4x 输出。
+目标尺寸与网页版 `compute_target_size` 完全一致：长边统一限制到 maxSide（大图会缩小，超采样即网页版锐度来源）；maxSide=0 为真实 4x。默认 4096。
 
 ## 重要源码位置
 
 ```text
-src/main/main.ts             Electron 主进程、窗口/acrylic 材质、IPC + 路径白名单、CSP、单实例锁、诊断导出
-src/main/job-queue.ts        任务队列、进度/落盘节流、取消打断、outputBytes 统计
-src/main/jobs-store.ts       user-data/jobs.json 持久化（原子写），关闭重开保留任务
-src/main/jobs-normalize.ts   任务落盘/读盘规整纯函数：300 条上限、中断任务标记、durationMs 补算
-src/main/comfy-engine.ts     内置 ComfyUI 启动、prompt 提交、websocket 真实进度、/interrupt、输出复制
-src/main/comfy-protocol.ts   ComfyUI 协议纯逻辑：assertHistoryHealthy、进度映射、prompt 构建（vitest 直测）
-src/main/output-path.ts      输出路径防覆盖：目标已存在时追加 _2/_3 序号
-src/main/hardware-probe.ts   ComfyUI Runtime / CUDA 检测
-src/main/settings.ts         设置规整 + DEFAULT_MODEL/DEFAULT_SCALE 产品常量
-src/main/settings-store.ts   user-data/settings.json 持久化
-src/main/types.ts            共享类型（UpscaleJob/UpscaleSettings/UpscalerApi 契约）
+src/main/main.ts             主进程：窗口/acrylic、IPC + 路径白名单、CSP、单实例锁、诊断导出
+src/main/job-queue.ts        本地超分队列（串行）、节流广播、interrupt 取消
+src/main/jobs-store.ts       jobs.json 原子写持久化
+src/main/jobs-normalize.ts   任务落盘规整纯函数（300 条上限、中断标记）
+src/main/comfy-engine.ts     内置 ComfyUI 生命周期、prompt 提交、ws 真实进度、/interrupt
+src/main/comfy-protocol.ts   ComfyUI 协议纯逻辑（assertHistoryHealthy、进度映射、prompt 构建）
+src/main/output-path.ts      输出路径防覆盖（_2/_3 序号）
+src/main/model-downloader.ts 模型按需下载：流式 + SHA256 + 多源重试 + userData 回退
+src/main/cloud/relay-protocol.ts  中转站协议纯逻辑（错误分类中文化、响应解析、maskKey）
+src/main/cloud/relay-client.ts    统一请求入口（Key 注入/超时/错误映射）
+src/main/cloud/key-store.ts       safeStorage 加密 Key 保管
+src/main/cloud/account.ts         Key 校验（/v1/models）+ 余额用量 + 5 分钟缓存
+src/main/cloud/image-protocol.ts  生图协议纯逻辑（b64/url 解析、参数规整、任务规整）
+src/main/cloud/image-gen.ts       生图 adapter（提交 + 落盘资产库 assets/images/YYYY-MM/）
+src/main/cloud/image-queue.ts     云任务队列（并行 2、原子写持久化、崩溃恢复）
+src/main/hardware-probe.ts   CUDA 检测（带指纹缓存）
+src/main/settings.ts         设置规整 + DEFAULT_MODEL/DEFAULT_SCALE 常量
+src/main/types.ts            共享类型 + UpscalerApi IPC 契约（preload/renderer 共用）
 src/preload/index.ts         contextBridge 暴露 window.upscaler
-src/renderer/main.tsx        React UI
-src/renderer/styles.css      苹果风 vibrancy 双主题（prefers-color-scheme 浅/深色设计 token）
-tests/                       vitest 单测（comfy-protocol、output-path、jobs-normalize 等纯逻辑）
-resources/comfyui-runtime    内置 ComfyUI + Python/PyTorch/CUDA runtime
+src/renderer/main.tsx        React UI（侧栏壳 + 四模块）
+src/renderer/styles.css      vibrancy 双主题设计 token
+tests/                       vitest 纯函数单测（48 项）
+resources/comfyui-runtime    内置 ComfyUI + Python/PyTorch/CUDA runtime（打包时过滤 *.pth）
 ```
 
-`src/main/upscaler-engine.ts`、`src/main/engine-errors.ts` 已随旧轻量链路删除；`resources/engines`、`resources/models` 目录仍是旧遗留，不是当前产品入口。不要重新接回，除非用户明确改变产品决策。
+## 关键实现事实
 
-## 当前实现要点
-
-- Electron 已升级到 `42.5.2`（Node 24）：主进程有原生 `WebSocket`，真实进度监听不再依赖额外的 ws 库。
-- `UpscaleSettings` 只剩 `outputFormat / outputDirectory / maxSide` 三个可变项；链路（ComfyUI）、模型（4x-UltraSharp.pth）、4x 倍数是 `settings.ts` 里的 `DEFAULT_MODEL / DEFAULT_SCALE` 产品常量，`sanitizeSettings()` 只规整这三项。
-- 任务字段 `tileSize` 已删除（读旧 jobs.json 时静默丢弃）；新增 `outputBytes`，任务成功后 stat 输出文件大小供 UI 展示。
-- `JobQueue.getJobs()` 按 `createdAt` 倒序返回，最新任务在最前。
-- `jobs-normalize.ts` 落盘最多保存 300 条任务；上次关闭时仍在 running/queued 的任务会标成 `已取消 / 上次关闭软件时已停止`；`durationMs` 缺失时用 `startedAt/finishedAt` 自动补算。
-- ComfyUI 进度优先监听 websocket `progress_state`，兼容老 `progress`，同时低频轮询 `/history/{prompt_id}` 作为完成信号双保险；协议判断（`assertHistoryHealthy`、进度映射、prompt 构建）拆在 `comfy-protocol.ts` 纯函数里，有 vitest 单测。
-- websocket 不可用时回退轮询 history；轮询只判断完成，不按时间伪造百分比。
-- 取消运行中的任务会调 ComfyUI `POST /interrupt` 并从 `/queue` 删除该 prompt，立即释放 GPU，不让废弃任务在后台算完（`interruptComfy()`）。
-- 输出目标文件已存在时自动追加 `_2/_3…` 序号（`output-path.ts`），避免同名不同格式或重复处理时静默覆盖旧输出。
-- UI 为苹果风 vibrancy 双主题：`styles.css` 用 `prefers-color-scheme` 切换浅/深色设计 token，窗口开 Win11 22H2+ `backgroundMaterial: "acrylic"` 系统毛玻璃；不支持 acrylic 的系统回退纯色底，底色跟随 `nativeTheme`。
-- `package.json` 打包过滤掉 DiffBIR/SUPIR 资源和其他 upscale 模型，只保留 `4x-UltraSharp.pth`。
+- Electron 42.5.2（Node 24）：主进程原生 WebSocket/fetch；本机 npm 装 electron 可能不下二进制，需手动 `node node_modules/electron/install.js`。
+- ComfyUI 失败任务 `completed=false`、只能靠 `status_str==="error"` 判败（comfy-protocol.assertHistoryHealthy）；websocket 错误分类后只有连接类错误才回退轮询。
+- 取消任务调 `/interrupt` + `/queue delete` 立即释放 GPU；输出复制后回收 ComfyUI output 侧产物。
+- 中转站已验证：`/v1/models`、`/v1/dashboard/billing/{subscription,usage}`、`/v1/images/generations`（b64_json 与 url 双模式都要兼容）。
+- 模型 SHA256：`a5812231fc936b42af08a5edba784195495d303d5b3248c24489ef0c4021fe01`（67MB）；下载源 hf-mirror 主、huggingface 备。
+- runtime 模型目录不可写时回退 `userData/models` + `extra_model_paths.yaml`（comfy-engine 启动自动携带 `--extra-model-paths-config`）。
+- 开发测试 Key 从环境变量 `RIVERMOON_TEST_KEY` 注入（仅未打包时），绝不写入仓库。
 
 ## 验证命令
 
 每次改代码至少执行：
 
 ```bash
-npm run build
 npm run lint
+npm run build
 npm test
 ```
 
-生成交付目录：
+生成交付目录：`npm run dist:dir`
 
-```bash
-npm run dist:dir
-```
-
-发版前启动：
-
-```text
-release\win-unpacked\RiverMoon 本地超分.exe
-```
-
-确认窗口能打开、工作区在首屏、右侧检测卡可用、拖入图片能输出、关闭重开任务记录仍在。
+发版前启动 `release\win-unpacked\RiverMoon 本地超分.exe` 检查：窗口打开、四模块导航、超分模块（无模型时出下载引导卡→下载→拖图出结果）、设置页填 Key 连接、生图端到端出图、余额刷新、关闭重开任务记录仍在、深浅色跟随系统。
 
 ## 已知限制
 
-- 需要 NVIDIA/CUDA；当前没有 CPU、DirectML、AMD/Intel fallback。
-- `4x-UltraSharp.pth` 有非商业授权风险，商业发版前必须解决授权或替换模型。
-- 完整 ComfyUI/PyTorch/CUDA 目录体积较大。
-- 安装包未代码签名时 Windows 可能提示未知发布者。
+- 超分需要 NVIDIA/CUDA；无 CPU/AMD fallback。
+- 生图需要 rivermoon7.com API Key（用户购买）。
+- 模型权重用户自下载（非商业授权自担）；充值页 URL 待正式地址。
+- 安装包未签名，Windows 可能提示未知发布者。

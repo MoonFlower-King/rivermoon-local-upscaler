@@ -24,6 +24,7 @@ import { ImageTaskQueue, loadSavedImageTasks } from "./cloud/image-queue.js";
 import { sanitizeImageParams } from "./cloud/image-protocol.js";
 import {
   cancelModelDownload,
+  cleanupStaleDownloads,
   getModelStatus,
   onModelDownloadUpdate,
   startModelDownload
@@ -285,6 +286,9 @@ function registerIpc(): void {
   onModelDownloadUpdate((state) => {
     mainWindow?.webContents.send("model:download-update", state);
   });
+
+  // 清理上次强退可能残留的模型下载临时文件（每个 67MB）。
+  void cleanupStaleDownloads();
 
   ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number, quality?: number) => {
     if (!isAllowedPath(filePath)) return null;

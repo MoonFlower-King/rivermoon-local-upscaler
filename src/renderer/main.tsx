@@ -89,11 +89,12 @@ function App() {
   }, [settings, settingsLoaded]);
 
   useEffect(() => {
-    const hasRunningJob = jobs.some((job) => job.status === "running");
-    if (!hasRunningJob) return;
+    const hasRunning =
+      jobs.some((job) => job.status === "running") || imageTasks.some((task) => task.status === "running");
+    if (!hasRunning) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [jobs]);
+  }, [jobs, imageTasks]);
 
   async function init() {
     const [assets, saved, currentJobs, info, currentImageTasks, currentModel] = await Promise.all([
@@ -358,6 +359,7 @@ function App() {
           <ImageGenModule
             account={account}
             tasks={imageTasks}
+            now={now}
             onGoSettings={() => setModule("settings")}
             onUpscale={upscaleImage}
           />
@@ -731,11 +733,13 @@ function pickImageModels(models: string[]): string[] {
 function ImageGenModule({
   account,
   tasks,
+  now,
   onGoSettings,
   onUpscale
 }: {
   account: AccountStatus | null;
   tasks: ImageGenTask[];
+  now: number;
   onGoSettings: () => void;
   onUpscale: (path: string) => void;
 }) {
@@ -821,14 +825,22 @@ function ImageGenModule({
             </div>
           </section>
 
-          <ImageTaskList tasks={tasks} onUpscale={onUpscale} />
+          <ImageTaskList tasks={tasks} now={now} onUpscale={onUpscale} />
         </>
       )}
     </>
   );
 }
 
-function ImageTaskList({ tasks, onUpscale }: { tasks: ImageGenTask[]; onUpscale: (path: string) => void }) {
+function ImageTaskList({
+  tasks,
+  now,
+  onUpscale
+}: {
+  tasks: ImageGenTask[];
+  now: number;
+  onUpscale: (path: string) => void;
+}) {
   const hasFinished = tasks.some((task) => task.status !== "running" && task.status !== "queued");
   return (
     <section className="panel">
@@ -847,7 +859,7 @@ function ImageTaskList({ tasks, onUpscale }: { tasks: ImageGenTask[]; onUpscale:
       ) : (
         <div className="job-list">
           {tasks.map((task) => (
-            <ImageTaskCard key={task.id} task={task} onUpscale={onUpscale} />
+            <ImageTaskCard key={task.id} task={task} now={now} onUpscale={onUpscale} />
           ))}
         </div>
       )}
@@ -855,7 +867,15 @@ function ImageTaskList({ tasks, onUpscale }: { tasks: ImageGenTask[]; onUpscale:
   );
 }
 
-function ImageTaskCard({ task, onUpscale }: { task: ImageGenTask; onUpscale: (path: string) => void }) {
+function ImageTaskCard({
+  task,
+  now,
+  onUpscale
+}: {
+  task: ImageGenTask;
+  now: number;
+  onUpscale: (path: string) => void;
+}) {
   const active = task.status === "running" || task.status === "queued";
   const promptPreview = task.params.prompt.length > 64 ? `${task.params.prompt.slice(0, 64)}…` : task.params.prompt;
 
@@ -913,7 +933,11 @@ function ImageTaskCard({ task, onUpscale }: { task: ImageGenTask; onUpscale: (pa
       ) : null}
 
       <div className="job-meta">
-        {task.durationMs != null ? <span>耗时 {formatDuration(task.durationMs)}</span> : null}
+        {task.status === "running" && task.startedAt ? (
+          <span>已用 {formatDuration(now - task.startedAt)}</span>
+        ) : task.durationMs != null ? (
+          <span>耗时 {formatDuration(task.durationMs)}</span>
+        ) : null}
         {active ? (
           <button className="secondary sm" onClick={() => void window.upscaler.cancelImageTask(task.id)}>
             取消
@@ -926,7 +950,7 @@ function ImageTaskCard({ task, onUpscale }: { task: ImageGenTask; onUpscale: (pa
 
 type AssetItem =
   | { kind: "upscale"; path: string; createdAt: number; job: UpscaleJob }
-  | { kind: "image"; path: string; createdAt: number };
+  | { kind: "image"; path: string; createdAt: number; bytes: number };
 
 function AssetsModule({
   jobs,
@@ -946,7 +970,12 @@ function AssetsModule({
     const fromImages = imageTasks
       .filter((task) => task.status === "succeeded")
       .flatMap((task) =>
-        task.outputPaths.map((path, index) => ({ kind: "image" as const, path, createdAt: task.createdAt + index }))
+        task.outputPaths.map((path, index) => ({
+          kind: "image" as const,
+          path,
+          createdAt: task.createdAt + index,
+          bytes: task.outputSizes[index] ?? 0
+        }))
       );
     return [...fromJobs, ...fromImages].sort((a, b) => b.createdAt - a.createdAt);
   }, [jobs, imageTasks]);
@@ -977,6 +1006,7 @@ function AssetsModule({
                 {item.kind === "upscale" && item.job.outputBytes != null ? (
                   <span>{formatBytes(item.job.outputBytes)}</span>
                 ) : null}
+                {item.kind === "image" && item.bytes > 0 ? <span>{formatBytes(item.bytes)}</span> : null}
               </div>
               <div className="asset-actions">
                 {item.kind === "upscale" ? (

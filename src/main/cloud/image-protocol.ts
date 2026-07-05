@@ -43,6 +43,10 @@ export function normalizeImageTask(value: unknown, now: number = Date.now()): Im
   if (!params) return null;
   const status = isImageStatus(raw.status) ? raw.status : "failed";
   const interrupted = status === "running" || status === "queued";
+  const outputPaths = Array.isArray(raw.outputPaths)
+    ? raw.outputPaths.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : [];
+  const rawSizes = Array.isArray(raw.outputSizes) ? raw.outputSizes : [];
   return {
     id: raw.id,
     params,
@@ -54,9 +58,11 @@ export function normalizeImageTask(value: unknown, now: number = Date.now()): Im
     message: interrupted ? "上次关闭软件时已停止" : typeof raw.message === "string" ? raw.message : "",
     error: typeof raw.error === "string" ? raw.error : null,
     needsTopup: raw.needsTopup === true,
-    outputPaths: Array.isArray(raw.outputPaths)
-      ? raw.outputPaths.filter((item): item is string => typeof item === "string" && item.length > 0)
-      : []
+    outputPaths,
+    outputSizes: outputPaths.map((_, index) => {
+      const size = rawSizes[index];
+      return typeof size === "number" && Number.isFinite(size) && size >= 0 ? size : 0;
+    })
   };
 }
 

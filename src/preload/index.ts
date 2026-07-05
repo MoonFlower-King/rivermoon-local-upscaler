@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { ImageGenParams, ImageGenTask, UpscaleJob, UpscalerApi } from "../main/types.js";
+import type { ImageGenParams, ImageGenTask, ModelDownloadState, UpscaleJob, UpscalerApi } from "../main/types.js";
 
 const api = {
   // Electron 32+ 移除了 File.path，拖拽文件改用 webUtils.getPathForFile 取真实路径。
@@ -39,6 +39,14 @@ const api = {
     const listener = (_event: Electron.IpcRendererEvent, tasks: unknown[]) => callback(tasks as ImageGenTask[]);
     ipcRenderer.on("image-tasks:updated", listener);
     return () => ipcRenderer.removeListener("image-tasks:updated", listener);
+  },
+  getModelStatus: () => ipcRenderer.invoke("model:get-status"),
+  downloadModel: () => ipcRenderer.invoke("model:download"),
+  cancelModelDownload: () => ipcRenderer.invoke("model:cancel-download"),
+  onModelDownload: (callback: (state: ModelDownloadState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state as ModelDownloadState);
+    ipcRenderer.on("model:download-update", listener);
+    return () => ipcRenderer.removeListener("model:download-update", listener);
   }
 } satisfies UpscalerApi;
 

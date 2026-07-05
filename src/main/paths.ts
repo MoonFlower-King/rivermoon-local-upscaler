@@ -43,9 +43,21 @@ export function comfyUpscaleModelsRoot(): string {
   return path.join(comfyRuntimeRoot(), "models", "upscale_models");
 }
 
+/** runtime 目录不可写时模型的回退位置（配合 extra_model_paths.yaml 挂给 ComfyUI）。 */
+export function userModelsRoot(): string {
+  return path.join(app.getPath("userData"), "models", "upscale_models");
+}
+
+export function extraModelPathsConfig(): string {
+  return path.join(app.getPath("userData"), "extra_model_paths.yaml");
+}
+
 export function findComfyModel(modelName = "4x-UltraSharp.pth"): string | null {
-  const candidate = path.join(comfyUpscaleModelsRoot(), modelName);
-  return fs.existsSync(candidate) ? candidate : null;
+  for (const dir of [comfyUpscaleModelsRoot(), userModelsRoot()]) {
+    const candidate = path.join(dir, modelName);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 export function logsRoot(): string {
@@ -55,10 +67,12 @@ export function logsRoot(): string {
 }
 
 export function listComfyModels(): string[] {
-  const dir = comfyUpscaleModelsRoot();
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((entry) => entry.toLowerCase().endsWith(".pth"))
-    .sort((a, b) => a.localeCompare(b));
+  const names = new Set<string>();
+  for (const dir of [comfyUpscaleModelsRoot(), userModelsRoot()]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir)) {
+      if (entry.toLowerCase().endsWith(".pth")) names.add(entry);
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
 }

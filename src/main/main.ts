@@ -22,6 +22,12 @@ import { loadKey, saveKey } from "./cloud/key-store.js";
 import { RelayError } from "./cloud/relay-protocol.js";
 import { ImageTaskQueue, loadSavedImageTasks } from "./cloud/image-queue.js";
 import { sanitizeImageParams } from "./cloud/image-protocol.js";
+import {
+  cancelModelDownload,
+  getModelStatus,
+  onModelDownloadUpdate,
+  startModelDownload
+} from "./model-downloader.js";
 import type { AccountStatus, AppInfo, AssetStatus, HardwareReport, StartJobsPayload } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
@@ -272,6 +278,13 @@ function registerIpc(): void {
     if (typeof id === "string") imageQueue.cancel(id);
   });
   ipcMain.handle("image-gen:clear-finished", () => imageQueue.clearFinished());
+
+  ipcMain.handle("model:get-status", () => getModelStatus());
+  ipcMain.handle("model:download", () => startModelDownload());
+  ipcMain.handle("model:cancel-download", () => cancelModelDownload());
+  onModelDownloadUpdate((state) => {
+    mainWindow?.webContents.send("model:download-update", state);
+  });
 
   ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number, quality?: number) => {
     if (!isAllowedPath(filePath)) return null;

@@ -65,10 +65,7 @@
           "!custom_nodes/ComfyUI-SUPIR/**",
           "!models/diffbir/**",
           "!models/checkpoints/**",
-          "!models/upscale_models/4x_foolhardy_Remacri.pth",
-          "!models/upscale_models/4x_NMKD-Siax_200k.pth",
-          "!models/upscale_models/RealESRGAN_x4plus.pth",
-          "!models/upscale_models/RealESRGAN_x4plus_anime_6B.pth"
+          "!models/upscale_models/*.pth"
         ]
       },
       {

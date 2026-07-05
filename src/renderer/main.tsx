@@ -9,6 +9,7 @@ import type {
   ImageFormat,
   ImageGenTask,
   UpscaleJob,
+  UpscaleModelStatus,
   UpscaleSettings
 } from "../main/types";
 import "./styles.css";
@@ -39,15 +40,25 @@ function App() {
   const [account, setAccount] = useState<AccountStatus | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [imageTasks, setImageTasks] = useState<ImageGenTask[]>([]);
+  const [modelStatus, setModelStatus] = useState<UpscaleModelStatus | null>(null);
   const dragDepth = useRef(0);
 
   useEffect(() => {
     void init();
     const unsubscribeJobs = window.upscaler.onJobsUpdated(setJobs);
     const unsubscribeImages = window.upscaler.onImageTasksUpdated(setImageTasks);
+    const unsubscribeModel = window.upscaler.onModelDownload((state) => {
+      setModelStatus((current) => (current ? { ...current, download: state } : current));
+      if (state.phase === "done") {
+        // 下载完成：重新探测模型与资源状态，超分链路即刻可用。
+        void window.upscaler.getModelStatus().then(setModelStatus);
+        void refresh();
+      }
+    });
     return () => {
       unsubscribeJobs();
       unsubscribeImages();
+      unsubscribeModel();
     };
     // init 只应在挂载时执行一次，依赖数组刻意留空。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,16 +96,18 @@ function App() {
   }, [jobs]);
 
   async function init() {
-    const [assets, saved, currentJobs, info, currentImageTasks] = await Promise.all([
+    const [assets, saved, currentJobs, info, currentImageTasks, currentModel] = await Promise.all([
       window.upscaler.getAssetStatus(),
       window.upscaler.getSettings(),
       window.upscaler.listJobs(),
       window.upscaler.getAppInfo(),
-      window.upscaler.listImageTasks()
+      window.upscaler.listImageTasks(),
+      window.upscaler.getModelStatus()
     ]);
     setAssetStatus(assets);
     setJobs(currentJobs);
     setImageTasks(currentImageTasks);
+    setModelStatus(currentModel);
     setAppInfo(info);
     setSettings(saved);
     setSettingsLoaded(true);
@@ -258,7 +271,14 @@ function App() {
             </div>
             <div className="workspace">
         <section className="left">
-          {hasContent ? (
+          {modelStatus && !modelStatus.installed ? (
+            <ModelSetupCard
+              status={modelStatus}
+              onDownload={() => void window.upscaler.downloadModel()}
+              onCancel={() => void window.upscaler.cancelModelDownload()}
+            />
+          ) : null}
+          {modelStatus?.installed === false ? null : hasContent ? (
             <div className={`dropstrip ${isDragging ? "dragging" : ""}`}>
               <span className="dropstrip-hint">
                 <BrandMark size={16} /> 拖入图片或文件夹，或
@@ -980,6 +1000,63 @@ function AssetsModule({
   );
 }
 
+function ModelSetupCard({
+  status,
+  onDownload,
+  onCancel
+}: {
+  status: UpscaleModelStatus;
+  onDownload: () => void;
+  onCancel: () => void;
+}) {
+  const download = status.download;
+  const busy = download.phase === "downloading" || download.phase === "verifying";
+  const percent = download.totalBytes > 0 ? Math.min(100, Math.round((download.receivedBytes / download.totalBytes) * 100)) : 0;
+
+  return (
+    <section className="panel model-setup">
+      <h2>下载超分模型</h2>
+      <p className="hw-hint">
+        首次使用需要下载 AI 模型 {status.fileName}（约 {formatBytes(status.sizeBytes)}）。模型为开源权重，
+        由你自行下载到本机使用；授权：{status.license}。下载完成后自动校验完整性。
+      </p>
+      {busy ? (
+        <>
+          <div
+            className="progress"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            aria-label="模型下载进度"
+          >
+            <div style={{ width: `${percent}%` }} />
+          </div>
+          <div className="model-setup-row">
+            <span className="hw-hint">
+              {download.phase === "verifying"
+                ? "正在校验文件完整性…"
+                : `${formatBytes(download.receivedBytes)} / ${formatBytes(download.totalBytes)}（${percent}%）`}
+            </span>
+            {download.phase === "downloading" ? (
+              <button className="secondary sm" onClick={onCancel}>
+                取消
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : (
+        <div className="model-setup-row">
+          <button className="primary" onClick={onDownload}>
+            {download.phase === "failed" ? "重试下载" : "下载模型"}
+          </button>
+          {download.message ? <span className="hint-warn">{download.message}</span> : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PendingList({ paths, onRemove }: { paths: string[]; onRemove: (path: string) => void }) {
   return (
     <section className="panel">
@@ -1200,7 +1277,8 @@ function AboutModal({
               })
             )}
             <p className="hw-hint">
-              商用分发前请逐一确认模型授权；4x-UltraSharp 为非商业授权，需替换为可商用模型或取得授权。
+              安装包不包含模型权重，模型由用户在应用内自行下载使用。4x-UltraSharp 为非商业授权（CC-BY-NC-SA
+              4.0），商用请自行确认或替换为可商用模型。
             </p>
           </div>
 

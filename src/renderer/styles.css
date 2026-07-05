@@ -951,6 +951,19 @@ input[type="range"] {
   font-weight: 600;
 }
 
+/* ── 模型下载引导卡 ── */
+.model-setup {
+  display: grid;
+  gap: 10px;
+}
+
+.model-setup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 /* ── 生图工作区 ── */
 .gen-controls {
   display: grid;

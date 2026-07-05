@@ -11,6 +11,7 @@ import {
   comfyOutputRoot,
   comfyPythonPath,
   comfyRuntimeRoot,
+  extraModelPathsConfig,
   findComfyModel
 } from "./paths.js";
 import { log, logsRoot } from "./logger.js";
@@ -180,7 +181,12 @@ async function startManagedComfy(signal: AbortSignal): Promise<string> {
 
   const logPath = path.join(logsRoot(), `comfyui-${Date.now()}.log`);
   const logFile = fs.openSync(logPath, "a");
-  const child = spawn(pythonPath, [mainPath, "--port", String(MANAGED_PORT), "--listen", "127.0.0.1"], {
+  const args = [mainPath, "--port", String(MANAGED_PORT), "--listen", "127.0.0.1"];
+  // 模型落在 userData 回退目录时（runtime 不可写），把 extra_model_paths 挂给 ComfyUI。
+  if (fs.existsSync(extraModelPathsConfig())) {
+    args.push("--extra-model-paths-config", extraModelPathsConfig());
+  }
+  const child = spawn(pythonPath, args, {
     cwd: comfyRuntimeRoot(),
     windowsHide: true,
     detached: false,

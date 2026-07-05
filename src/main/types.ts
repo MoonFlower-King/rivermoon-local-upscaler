@@ -115,6 +115,23 @@ export type ImageGenTask = {
   outputPaths: string[];
 };
 
+/** 超分模型下载状态（安装包不含权重，用户界面内自主下载）。 */
+export type ModelDownloadState = {
+  phase: "idle" | "downloading" | "verifying" | "failed" | "done";
+  receivedBytes: number;
+  totalBytes: number;
+  message: string | null;
+};
+
+export type UpscaleModelStatus = {
+  installed: boolean;
+  path: string | null;
+  fileName: string;
+  sizeBytes: number;
+  license: string;
+  download: ModelDownloadState;
+};
+
 /** 中转站账户状态。渲染层只能拿到掩码 Key，永不接触明文。 */
 export type AccountStatus = {
   connected: boolean;
@@ -163,4 +180,9 @@ export interface UpscalerApi {
   cancelImageTask(id: string): Promise<void>;
   clearFinishedImageTasks(): Promise<void>;
   onImageTasksUpdated(callback: (tasks: ImageGenTask[]) => void): () => void;
+  /** 超分模型按需下载。 */
+  getModelStatus(): Promise<UpscaleModelStatus>;
+  downloadModel(): Promise<void>;
+  cancelModelDownload(): Promise<void>;
+  onModelDownload(callback: (state: ModelDownloadState) => void): () => void;
 }

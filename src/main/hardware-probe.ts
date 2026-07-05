@@ -64,12 +64,17 @@ export async function probeHardware(): Promise<HardwareReport> {
   const issues: string[] = [];
   const hints: string[] = [];
 
-  const comfyRuntimeFound = Boolean(comfyPythonPath() && fs.existsSync(comfyMainPath()) && findComfyModel("4x-UltraSharp.pth"));
+  // 运行时（引擎）与模型分开判断：模型按需下载是正常状态，不应报成“引擎缺失”。
+  const comfyRuntimeFound = Boolean(comfyPythonPath() && fs.existsSync(comfyMainPath()));
+  const modelFound = Boolean(findComfyModel("4x-UltraSharp.pth"));
   const gpus = await queryGpus();
 
   if (!comfyRuntimeFound) {
-    issues.push("未找到网站同款 ComfyUI Runtime。");
-    hints.push("如需网站同款质量，请安装完整版，或先运行 scripts\\prepare-comfyui-runtime.ps1 准备 resources/comfyui-runtime。");
+    issues.push("未找到内置 AI 引擎运行时。");
+    hints.push("请重新安装完整版，或先运行 scripts\\prepare-comfyui-runtime.ps1 准备 resources/comfyui-runtime。");
+  } else if (!modelFound) {
+    issues.push("超分模型尚未下载。");
+    hints.push("打开「图片超分」页，点击「下载模型」即可开始使用（约 64MB）。");
   }
 
   const durationMs: number | null = null;
@@ -87,7 +92,7 @@ export async function probeHardware(): Promise<HardwareReport> {
   }
 
   const report: HardwareReport = {
-    ok: comfyRuntimeFound && comfyuiCudaAvailable,
+    ok: comfyRuntimeFound && comfyuiCudaAvailable && modelFound,
     comfyuiRuntimeFound: comfyRuntimeFound,
     comfyuiCudaAvailable,
     cudaDevices,

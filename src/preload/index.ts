@@ -22,6 +22,10 @@ const api = {
   reveal: (filePath: string) => ipcRenderer.invoke("shell:reveal", filePath),
   getPreview: (filePath: string, maxSide?: number, quality?: number) =>
     ipcRenderer.invoke("image:preview", filePath, maxSide, quality),
+  getAccountStatus: (force?: boolean) => ipcRenderer.invoke("account:get-status", force),
+  setRelayKey: (key: string) => ipcRenderer.invoke("account:set-key", key),
+  clearRelayKey: () => ipcRenderer.invoke("account:clear-key"),
+  openTopup: () => ipcRenderer.invoke("account:open-topup"),
   onJobsUpdated: (callback: (jobs: UpscaleJob[]) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, jobs: unknown[]) => callback(jobs as UpscaleJob[]);
     ipcRenderer.on("jobs:updated", listener);

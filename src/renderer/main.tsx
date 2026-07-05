@@ -1,8 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DEFAULT_SETTINGS } from "../main/settings";
-import type { AppInfo, AssetStatus, HardwareReport, ImageFormat, UpscaleJob, UpscaleSettings } from "../main/types";
+import type {
+  AccountStatus,
+  AppInfo,
+  AssetStatus,
+  HardwareReport,
+  ImageFormat,
+  UpscaleJob,
+  UpscaleSettings
+} from "../main/types";
 import "./styles.css";
+
+type ModuleId = "upscale" | "imagegen" | "assets" | "settings";
+
+const NAV_ITEMS: Array<{ id: ModuleId; label: string; badge?: string }> = [
+  { id: "upscale", label: "图片超分", badge: "免费" },
+  { id: "imagegen", label: "AI 生图" },
+  { id: "assets", label: "资产库" },
+  { id: "settings", label: "设置" }
+];
 
 function App() {
   const [assetStatus, setAssetStatus] = useState<AssetStatus | null>(null);
@@ -17,6 +34,9 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [compareJob, setCompareJob] = useState<UpscaleJob | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [module, setModule] = useState<ModuleId>("upscale");
+  const [account, setAccount] = useState<AccountStatus | null>(null);
+  const [accountBusy, setAccountBusy] = useState(false);
   const dragDepth = useRef(0);
 
   useEffect(() => {
@@ -62,6 +82,21 @@ function App() {
     setSettingsLoaded(true);
     // 启动即自动自检（命中缓存时瞬时返回），用户不再需要自己发现“检测”按钮。
     void probeHardware(false);
+    // 账户状态并行加载，不阻塞首屏。
+    void window.upscaler.getAccountStatus().then(setAccount);
+  }
+
+  async function connectKey(key: string) {
+    setAccountBusy(true);
+    try {
+      setAccount(await window.upscaler.setRelayKey(key));
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+
+  async function disconnectKey() {
+    setAccount(await window.upscaler.clearRelayKey());
   }
 
   async function probeHardware(force: boolean) {
@@ -128,6 +163,8 @@ function App() {
     if (paths.length === 0) return;
     const files = await window.upscaler.discoverFiles(paths);
     addPending(files);
+    // 在任何模块拖入图片都视为想要超分，自动切过去。
+    setModule("upscale");
   }
 
   const counts = useMemo(() => {
@@ -146,37 +183,56 @@ function App() {
 
   return (
     <main
-      className="app"
+      className="shell"
       onDragEnter={handleDragEnter}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={handleDragLeave}
       onDrop={(event) => void handleDrop(event)}
     >
-      <header className="topbar">
-        <div className="topbar-title">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
           <span className="brand-mark">
-            <BrandMark size={30} framed />
+            <BrandMark size={20} framed />
           </span>
-          <div>
-            <h1>RiverMoon 本地超分</h1>
-            <p>本地 AI 高清放大，图片不离开这台电脑</p>
-          </div>
+          <span>RiverMoon</span>
         </div>
-        <div className="topbar-actions">
-          <StatusPill
-            assetStatus={assetStatus}
-            hardware={hardware}
-            loading={hardwareLoading}
-            counts={counts}
-            onRetest={() => void probeHardware(true)}
-          />
-          <button className="secondary" onClick={() => setShowAbout(true)}>
-            关于
-          </button>
-        </div>
-      </header>
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              className={`nav-item ${module === item.id ? "on" : ""}`}
+              onClick={() => setModule(item.id)}
+            >
+              {item.label}
+              {item.badge ? <span className="nav-badge">{item.badge}</span> : null}
+            </button>
+          ))}
+        </nav>
+        <span className="spacer" />
+        <AccountCard
+          account={account}
+          onTopup={() => void window.upscaler.openTopup()}
+          onGoSettings={() => setModule("settings")}
+        />
+      </aside>
 
-      <div className="workspace">
+      <section className="content">
+        {module === "upscale" ? (
+          <>
+            <div className="module-head">
+              <div>
+                <h1>图片超分</h1>
+                <p>本地 AI 高清放大，图片不离开这台电脑 · 永久免费</p>
+              </div>
+              <StatusPill
+                assetStatus={assetStatus}
+                hardware={hardware}
+                loading={hardwareLoading}
+                counts={counts}
+                onRetest={() => void probeHardware(true)}
+              />
+            </div>
+            <div className="workspace">
         <section className="left">
           {hasContent ? (
             <div className={`dropstrip ${isDragging ? "dragging" : ""}`}>
@@ -251,6 +307,23 @@ function App() {
           ) : null}
         </aside>
       </div>
+          </>
+        ) : null}
+
+        {module === "imagegen" ? (
+          <ImageGenModule account={account} onGoSettings={() => setModule("settings")} />
+        ) : null}
+        {module === "assets" ? <AssetsModule jobs={jobs} onCompare={setCompareJob} /> : null}
+        {module === "settings" ? (
+          <SettingsModule
+            account={account}
+            busy={accountBusy}
+            onConnect={(key) => void connectKey(key)}
+            onClear={() => void disconnectKey()}
+            onShowAbout={() => setShowAbout(true)}
+          />
+        ) : null}
+      </section>
 
       {showAbout ? <AboutModal info={appInfo} hardware={hardware} onClose={() => setShowAbout(false)} /> : null}
       {compareJob ? <CompareModal job={compareJob} onClose={() => setCompareJob(null)} /> : null}
@@ -463,6 +536,197 @@ function SettingsPanel({
         </button>
       </div>
     </section>
+  );
+}
+
+function AccountCard({
+  account,
+  onTopup,
+  onGoSettings
+}: {
+  account: AccountStatus | null;
+  onTopup: () => void;
+  onGoSettings: () => void;
+}) {
+  if (!account) {
+    return (
+      <div className="account-card">
+        <span className="account-label">账户</span>
+        <p className="account-note">读取中…</p>
+      </div>
+    );
+  }
+  if (!account.connected) {
+    return (
+      <div className="account-card">
+        <span className="account-label">账户</span>
+        <p className="account-note">{account.error ?? "未连接中转站，生图功能需要 API Key"}</p>
+        <button className="secondary sm" onClick={onGoSettings}>
+          {account.maskedKey ? "检查连接" : "连接账户"}
+        </button>
+      </div>
+    );
+  }
+  const remaining =
+    account.totalUsd != null && account.usedUsd != null ? Math.max(0, account.totalUsd - account.usedUsd) : null;
+  const balanceText =
+    account.totalUsd != null && account.totalUsd >= 1_000_000
+      ? "不限额"
+      : remaining != null
+        ? `$${remaining.toFixed(2)}`
+        : account.usedUsd != null
+          ? `已用 $${account.usedUsd.toFixed(2)}`
+          : "—";
+  return (
+    <div className="account-card">
+      <span className="account-label">余额</span>
+      <strong className="account-balance">{balanceText}</strong>
+      <span className="account-note">
+        {account.maskedKey} · 模型 {account.models.length} 个
+      </span>
+      <button className="primary sm" onClick={onTopup}>
+        充值
+      </button>
+    </div>
+  );
+}
+
+function SettingsModule({
+  account,
+  busy,
+  onConnect,
+  onClear,
+  onShowAbout
+}: {
+  account: AccountStatus | null;
+  busy: boolean;
+  onConnect: (key: string) => void;
+  onClear: () => void;
+  onShowAbout: () => void;
+}) {
+  const [keyInput, setKeyInput] = useState("");
+  const connected = Boolean(account?.connected);
+
+  return (
+    <>
+      <div className="module-head">
+        <div>
+          <h1>设置</h1>
+          <p>账户与应用信息</p>
+        </div>
+      </div>
+      <section className="panel settings-page">
+        <h2>中转站账户</h2>
+        <p className="hw-hint">
+          在 rivermoon7.com 获取 API Key 后粘贴连接。AI 生图会把提示词发送到中转站处理；本地超分不上传任何图片。
+        </p>
+        {connected && account ? (
+          <div className="key-status ok">
+            已连接 {account.maskedKey} · 可用模型 {account.models.length} 个
+          </div>
+        ) : account?.error ? (
+          <div className="key-status warn">{account.error}</div>
+        ) : null}
+        <div className="key-row">
+          <input
+            type="password"
+            placeholder="sk-..."
+            value={keyInput}
+            aria-label="API Key"
+            onChange={(event) => setKeyInput(event.target.value)}
+          />
+          <button
+            className="primary"
+            disabled={busy || keyInput.trim().length === 0}
+            onClick={() => {
+              onConnect(keyInput.trim());
+              setKeyInput("");
+            }}
+          >
+            {busy ? "校验中…" : connected ? "更换 Key" : "连接"}
+          </button>
+          {connected ? (
+            <button className="secondary" disabled={busy} onClick={onClear}>
+              断开
+            </button>
+          ) : null}
+        </div>
+      </section>
+      <section className="panel settings-page">
+        <h2>关于</h2>
+        <p className="hw-hint">版本信息、内置模型授权与诊断日志导出。</p>
+        <div>
+          <button className="secondary" onClick={onShowAbout}>
+            打开关于面板
+          </button>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ImageGenModule({ account, onGoSettings }: { account: AccountStatus | null; onGoSettings: () => void }) {
+  return (
+    <>
+      <div className="module-head">
+        <div>
+          <h1>AI 生图</h1>
+          <p>用中转站的云端模型生成图片</p>
+        </div>
+      </div>
+      {account?.connected ? (
+        <div className="panel empty">
+          生图工作台即将上线。账户已就绪，可用模型 {account.models.length} 个。
+        </div>
+      ) : (
+        <div className="panel empty">
+          <p>连接 rivermoon7.com 账户后即可生成图片。</p>
+          <button className="primary" onClick={onGoSettings}>
+            去连接账户
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function AssetsModule({ jobs, onCompare }: { jobs: UpscaleJob[]; onCompare: (job: UpscaleJob) => void }) {
+  const outputs = jobs.filter((job) => job.status === "succeeded" && job.outputPath);
+  return (
+    <>
+      <div className="module-head">
+        <div>
+          <h1>资产库</h1>
+          <p>本机产出的所有图片</p>
+        </div>
+      </div>
+      {outputs.length === 0 ? (
+        <div className="panel empty">还没有产出。跑一次超分，结果会出现在这里。</div>
+      ) : (
+        <div className="asset-grid">
+          {outputs.map((job) => (
+            <div className="asset-card" key={job.id}>
+              <Thumb path={job.outputPath!} max={320} className="thumb-asset" />
+              <span className="asset-name">{basename(job.outputPath!)}</span>
+              <div className="asset-meta">
+                <span>
+                  {job.targetDimensions ? `${job.targetDimensions.width}×${job.targetDimensions.height}` : ""}
+                </span>
+                {job.outputBytes != null ? <span>{formatBytes(job.outputBytes)}</span> : null}
+              </div>
+              <div className="asset-actions">
+                <button className="secondary sm" onClick={() => onCompare(job)}>
+                  对比
+                </button>
+                <button className="secondary sm" onClick={() => void window.upscaler.reveal(job.outputPath!)}>
+                  打开位置
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

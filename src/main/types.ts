@@ -89,6 +89,18 @@ export type StartJobsPayload = {
   settings: UpscaleSettings;
 };
 
+/** 中转站账户状态。渲染层只能拿到掩码 Key，永不接触明文。 */
+export type AccountStatus = {
+  connected: boolean;
+  maskedKey: string | null;
+  /** 该 Key 分组可用的模型 id 列表（驱动生图模型选择器）。 */
+  models: string[];
+  totalUsd: number | null;
+  usedUsd: number | null;
+  /** 校验/网络失败时的中文说明；正常为 null。 */
+  error: string | null;
+};
+
 /**
  * preload 经 contextBridge 暴露到 window.upscaler 的 API 契约。
  * preload（实现）与 renderer 的 global.d.ts（声明）共用此接口，避免两处定义漂移。
@@ -113,4 +125,10 @@ export interface UpscalerApi {
   reveal(filePath: string): Promise<void>;
   getPreview(filePath: string, maxSide?: number, quality?: number): Promise<string | null>;
   onJobsUpdated(callback: (jobs: UpscaleJob[]) => void): () => void;
+  /** 账户（中转站 Key）。setRelayKey 校验通过才保存，失败 reject 中文错误。 */
+  getAccountStatus(force?: boolean): Promise<AccountStatus>;
+  setRelayKey(key: string): Promise<AccountStatus>;
+  clearRelayKey(): Promise<AccountStatus>;
+  /** 打开充值页（主进程白名单校验，仅允许 rivermoon7.com）。 */
+  openTopup(): Promise<void>;
 }

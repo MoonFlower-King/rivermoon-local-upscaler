@@ -17,7 +17,10 @@ import { getHardwareReport } from "./hardware-probe.js";
 import { loadSettings, saveSettings } from "./settings-store.js";
 import { loadSavedJobs } from "./jobs-store.js";
 import { log, readRecentLog, logsRoot } from "./logger.js";
-import type { AppInfo, AssetStatus, HardwareReport, StartJobsPayload } from "./types.js";
+import { TOPUP_URL, clearAccountKey, getAccountStatus, setAccountKey } from "./cloud/account.js";
+import { loadKey, saveKey } from "./cloud/key-store.js";
+import { RelayError } from "./cloud/relay-protocol.js";
+import type { AccountStatus, AppInfo, AssetStatus, HardwareReport, StartJobsPayload } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
 let jobQueue: JobQueue;
@@ -226,6 +229,31 @@ function registerIpc(): void {
     await shell.showItemInFolder(filePath);
   });
 
+  ipcMain.handle("account:get-status", (_event, force?: boolean) => getAccountStatus(Boolean(force)));
+
+  ipcMain.handle("account:set-key", async (_event, key: unknown): Promise<AccountStatus> => {
+    try {
+      return await setAccountKey(key);
+    } catch (error) {
+      // 校验失败不保存 Key；错误以中文文案回传 UI，不裸抛。
+      return {
+        connected: false,
+        maskedKey: null,
+        models: [],
+        totalUsd: null,
+        usedUsd: null,
+        error: error instanceof RelayError ? error.message : "校验失败，请稍后重试。"
+      };
+    }
+  });
+
+  ipcMain.handle("account:clear-key", () => clearAccountKey());
+
+  ipcMain.handle("account:open-topup", () => {
+    // openExternal 白名单：只允许打开中转站域名，防止任意 URL 注入。
+    if (TOPUP_URL.startsWith("https://rivermoon7.com")) void shell.openExternal(TOPUP_URL);
+  });
+
   ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number, quality?: number) => {
     if (!isAllowedPath(filePath)) return null;
     const safeQuality = typeof quality === "number" && Number.isFinite(quality) ? Math.min(100, Math.max(1, Math.round(quality))) : 80;
@@ -359,6 +387,11 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(async () => {
     log(`应用启动 v${app.getVersion()} · ${process.platform} ${process.arch}`);
+    // 开发便利：环境变量注入测试 Key（仅未打包时），便于自动化验证账户链路。
+    if (!app.isPackaged && process.env.RIVERMOON_TEST_KEY && !loadKey()) {
+      saveKey(process.env.RIVERMOON_TEST_KEY);
+      log("已从 RIVERMOON_TEST_KEY 注入开发测试 Key");
+    }
     applyContentSecurityPolicy();
     registerIpc();
     nativeTheme.on("updated", () => {

@@ -31,6 +31,7 @@ Default max side is `4096`. `0` means true 4x.
 - Settings panel.
 - Compact status card.
 - Compare modal with zoom/pan.
+- Apple-style vibrancy design with light/dark themes: CSS tokens switch via `prefers-color-scheme`, rendered over the Win11 acrylic window material (plain background fallback elsewhere).
 
 ### Preload
 
@@ -38,21 +39,25 @@ Exposes typed IPC for file picking, starting jobs, listing jobs, subscribing to 
 
 ### Main Process
 
-- Owns local `user-data` path.
+- Owns local `user-data` path (falls back to the Electron default when the local directory is not writable).
 - Loads settings and saved jobs.
-- Validates paths and reads image dimensions.
+- Validates renderer-supplied paths against an allowlist and reads image dimensions.
 - Computes target size.
-- Starts and monitors ComfyUI.
-- Emits job updates.
+- Resolves collision-free output paths: appends `_2`/`_3`… when the target file already exists (`src/main/output-path.ts`).
+- Starts and monitors ComfyUI; cancelling a running job interrupts ComfyUI to free the GPU immediately.
+- Records the output file size (`outputBytes`) on success.
+- Emits throttled job updates.
 - Writes `jobs.json`, `settings.json`, and logs.
 
 ### Comfy Engine
 
 - Starts bundled ComfyUI/Python if needed.
-- Submits prompt with a fixed `client_id`.
-- Listens to websocket progress events.
-- Uses history polling as completion fallback.
-- Copies or transcodes final output.
+- Submits prompt with a per-job random `client_id`.
+- Listens to websocket progress events (`progress_state`, legacy `progress`) via the main process's native `WebSocket` (Electron 42.5.2 / Node 24, no extra dependency).
+- Low-frequency history polling doubles as a completion safety net; when the websocket is unavailable it falls back to polling only (completion checks, no time-based fake progress).
+- Cancellation POSTs `/interrupt` and removes the prompt from `/queue`.
+- Copies or transcodes final output, then cleans up temporary input/output files inside the ComfyUI runtime.
+- Pure protocol logic (prompt building, progress mapping, history health checks such as `assertHistoryHealthy`) lives in `src/main/comfy-protocol.ts`, unit-tested with vitest.
 
 ## Persistence
 
@@ -79,6 +84,16 @@ release\win-unpacked\
 ```
 
 The app is ASAR-packed. Runtime resources are copied via `extraResources`.
+
+## Quality Gates
+
+Run after every code change:
+
+```text
+npm run build
+npm run lint
+npm test
+```
 
 ## Failure Model
 

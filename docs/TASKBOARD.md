@@ -37,13 +37,13 @@
 | 1.4 | relay-client：Key 注入、超时、错误中文化映射（401/429/quota/网络） | ✅ | relay-protocol 纯函数 10 项单测覆盖 |
 | 1.5 | 资产库模块 v1：基于任务记录列出超分成功输出（网格+预览+打开位置） | ✅ | 缺失文件由预览通道自然显示灰占位 |
 
-### M2 AI 生图
+### M2 AI 生图 ✅（2026-07-05）
 | # | 任务 | 状态 | 验收标准 |
 |---|---|---|---|
-| 2.1 | 云任务队列：CloudTaskQueue（并行度 2）+ cloud-tasks.json 原子写持久化 + 崩溃恢复标记 | ⬜ | 关闭重开任务记录仍在；进行中任务标记中断 |
-| 2.2 | openai-image adapter：/v1/images/generations，b64/url 双模式，产物落资产库 `images/YYYY-MM/` | ⬜ | 真实 Key 出图落盘；vitest 覆盖响应解析纯函数 |
-| 2.3 | 生图工作区 UI：模型动态列表、提示词、尺寸/数量、结果卡流、失败重试 | ⬜ | 端到端出图；quota 错误显示充值引导 |
-| 2.4 | 「超分到 4K」联动：生成图一键进本地超分队列 | ⬜ | 云端产物直接超分成功 |
+| 2.1 | 云任务队列：ImageTaskQueue（并行度 2）+ image-tasks.json 原子写持久化 + 崩溃恢复标记 | ✅ | normalizeImageTask 单测覆盖中断标记；will-quit flushSync 接入 |
+| 2.2 | openai-image adapter：/v1/images/generations，b64/url 双模式，产物落资产库 `images/YYYY-MM/` | ✅ | **真实 Key E2E 通过**（40.7s 出图落盘 57.5KB）；解析纯函数 7 项单测 |
+| 2.3 | 生图工作区 UI：模型动态列表、提示词、尺寸/数量、结果卡流、失败重试 + quota 充值引导 | ✅ | adapter 层 E2E 已验；**UI 点击链路请人工点一次生成**（低风险，IPC 全程有类型契约） |
+| 2.4 | 「超分到 4K」联动：生成图/资产库一键进本地超分队列并切换模块 | ✅ | 产物终态即入路径白名单，jobs:start 直接放行 |
 
 ### M3 模型按需下载
 | # | 任务 | 状态 | 验收标准 |
@@ -70,7 +70,11 @@
 - 2026-07-05：充值页 URL 未定 → 1.3 用首页占位，M4 换正式地址。
 - 2026-07-05（M1 自查）：`account:set-key` 失败时返回 `maskedKey: null`，若用户原本已连接、换 Key 失败，账户卡会短暂显示「未连接」——应保留旧 Key 状态。M2 顺手修（改为失败时回读 getAccountStatus）。
 - 2026-07-05（M1 自查）：dev 注入的测试 Key 会加密写进 `.local-user-data/relay-key.json`，该目录已 gitignore，但清库测试时记得删。
-- 2026-07-05（M1 自查）：余额展示对 NewAPI「无限额度」账户显示「不限额」（阈值 1e6 USD），真实客户 Key 的小额度展示尚未用真实数据验证过 → M2 验收时确认。
+- 2026-07-05（M1 自查）：余额展示对 NewAPI「无限额度」账户显示「不限额」（阈值 1e6 USD），真实客户 Key 的小额度展示尚未用真实数据验证过 → M4 用真实客户 Key 确认。
+- 2026-07-05（M2 自查）：M1 问题 #1（换 Key 失败丢旧连接状态）已修——失败时回读现有连接并附加错误说明。
+- 2026-07-05（M2 自查）：生图任务 running 时不显示实时已用秒数（本地超分有）→ M4 打磨项。
+- 2026-07-05（M2 自查）：pickImageModels 靠命名启发式（/image|dall|flux|…/），分组里没有匹配时会全量展示（含聊天模型），用户误选聊天模型会得到中文报错但体验一般 → M4 考虑维护已知生图模型清单。
+- 2026-07-05（M2 自查）：资产库里生图产物没有尺寸/文件大小元数据（未 stat）→ M4 顺手补。
 
 ## 变更日志
 
@@ -78,3 +82,6 @@
 - 2026-07-05 M1 完成：新增 src/main/cloud/{relay-protocol,relay-client,key-store,account}.ts、
   渲染层侧栏壳（NAV_ITEMS/AccountCard/SettingsModule/ImageGenModule 占位/AssetsModule）、
   account:* IPC 四件套、dev 环境 RIVERMOON_TEST_KEY 自动注入。测试 32→41。
+- 2026-07-05 M2 完成：新增 cloud/{image-protocol,image-gen,image-queue}.ts、image-gen:* IPC、
+  生图工作区（模型派生选择/提示词/尺寸/数量/结果卡/重试/充值引导/取消）、资产库合并生图产物、
+  「超分到 4K」联动、生图终态自动刷新余额。测试 41→48。真实 Key adapter E2E 通过。

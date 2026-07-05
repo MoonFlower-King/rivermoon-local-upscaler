@@ -246,8 +246,27 @@ select:focus-visible,
   box-shadow: var(--focus-ring);
 }
 
+textarea {
+  min-height: 68px;
+  background: var(--field-bg);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+  font: inherit;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
 input[type="number"],
 input[type="text"],
+input[type="password"],
 select {
   min-height: 30px;
   background: var(--field-bg);
@@ -259,6 +278,7 @@ select {
 
 input[type="number"]:focus,
 input[type="text"]:focus,
+input[type="password"]:focus,
 select:focus {
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
@@ -790,6 +810,21 @@ input[type="range"] {
   transition: width 200ms ease;
 }
 
+/* 云端任务没有真实百分比，用往复动画表示进行中，不伪造数字。 */
+.progress.indeterminate div {
+  width: 38%;
+  animation: indeterminate 1.3s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% {
+    margin-left: -38%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
 .job-meta {
   display: flex;
   flex-wrap: wrap;
@@ -905,6 +940,79 @@ input[type="range"] {
 .asset-actions {
   display: flex;
   gap: 6px;
+}
+
+.kind-tag {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--gray-bg);
+  color: var(--gray-text);
+  font-weight: 600;
+}
+
+/* ── 生图工作区 ── */
+.gen-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.gen-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gen-row label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-2);
+  flex: 1;
+  min-width: 150px;
+}
+
+.gen-prompt-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.gen-prompt-row textarea {
+  flex: 1;
+}
+
+.gen-btn {
+  min-width: 96px;
+  font-size: 14px;
+}
+
+.gen-outputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.gen-output {
+  display: grid;
+  gap: 5px;
+}
+
+.thumb-gen {
+  width: 100%;
+  height: 132px;
+  border-radius: 8px;
+}
+
+.gen-output-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.job-error-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* ── 右栏设置（vibrancy 面板） ── */

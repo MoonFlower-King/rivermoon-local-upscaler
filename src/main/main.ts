@@ -17,13 +17,16 @@ import { getHardwareReport } from "./hardware-probe.js";
 import { loadSettings, saveSettings } from "./settings-store.js";
 import { loadSavedJobs } from "./jobs-store.js";
 import { log, readRecentLog, logsRoot } from "./logger.js";
-import { TOPUP_URL, clearAccountKey, getAccountStatus, setAccountKey } from "./cloud/account.js";
+import { TOPUP_URL, clearAccountKey, getAccountStatus, invalidateAccountCache, setAccountKey } from "./cloud/account.js";
 import { loadKey, saveKey } from "./cloud/key-store.js";
 import { RelayError } from "./cloud/relay-protocol.js";
+import { ImageTaskQueue, loadSavedImageTasks } from "./cloud/image-queue.js";
+import { sanitizeImageParams } from "./cloud/image-protocol.js";
 import type { AccountStatus, AppInfo, AssetStatus, HardwareReport, StartJobsPayload } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
 let jobQueue: JobQueue;
+let imageQueue: ImageTaskQueue;
 let lastHardwareReport: HardwareReport | null = null;
 
 /**
@@ -112,6 +115,15 @@ async function createWindow(): Promise<void> {
   });
 
   jobQueue = new JobQueue(() => mainWindow, await loadSavedJobs());
+  imageQueue = new ImageTaskQueue(() => mainWindow, await loadSavedImageTasks(), (task) => {
+    // 终态钩子：产物进入路径白名单（预览/定位/送超分），并让余额缓存失效。
+    if (task.outputPaths.length > 0) allowPaths(task.outputPaths);
+    invalidateAccountCache();
+  });
+  // 历史生图产物允许预览与「打开位置」。
+  for (const task of imageQueue.getTasks()) {
+    if (task.outputPaths.length > 0) allowPaths(task.outputPaths);
+  }
 
   try {
     if (!app.isPackaged) {
@@ -235,15 +247,11 @@ function registerIpc(): void {
     try {
       return await setAccountKey(key);
     } catch (error) {
-      // 校验失败不保存 Key；错误以中文文案回传 UI，不裸抛。
-      return {
-        connected: false,
-        maskedKey: null,
-        models: [],
-        totalUsd: null,
-        usedUsd: null,
-        error: error instanceof RelayError ? error.message : "校验失败，请稍后重试。"
-      };
+      // 校验失败不保存新 Key；若原本已有可用连接则保留旧状态，只附加错误说明。
+      const message = error instanceof RelayError ? error.message : "校验失败，请稍后重试。";
+      const current = loadKey() ? await getAccountStatus() : null;
+      if (current?.connected) return { ...current, error: `新 Key 校验失败（${message}），已保留原连接。` };
+      return { connected: false, maskedKey: null, models: [], totalUsd: null, usedUsd: null, error: message };
     }
   });
 
@@ -253,6 +261,17 @@ function registerIpc(): void {
     // openExternal 白名单：只允许打开中转站域名，防止任意 URL 注入。
     if (TOPUP_URL.startsWith("https://rivermoon7.com")) void shell.openExternal(TOPUP_URL);
   });
+
+  ipcMain.handle("image-gen:start", (_event, params: unknown) => {
+    const clean = sanitizeImageParams(params);
+    if (!clean) return null;
+    return imageQueue.start(clean);
+  });
+  ipcMain.handle("image-gen:list", () => imageQueue.getTasks());
+  ipcMain.handle("image-gen:cancel", (_event, id: unknown) => {
+    if (typeof id === "string") imageQueue.cancel(id);
+  });
+  ipcMain.handle("image-gen:clear-finished", () => imageQueue.clearFinished());
 
   ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number, quality?: number) => {
     if (!isAllowedPath(filePath)) return null;
@@ -381,6 +400,11 @@ if (!app.requestSingleInstanceLock()) {
       jobQueue?.flushSync();
     } catch {
       // 退出落盘失败不阻塞退出。
+    }
+    try {
+      imageQueue?.flushSync();
+    } catch {
+      // 同上。
     }
     shutdownComfy();
   });

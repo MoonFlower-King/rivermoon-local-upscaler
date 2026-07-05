@@ -7,6 +7,7 @@ import type {
   AssetStatus,
   HardwareReport,
   ImageFormat,
+  ImageGenTask,
   UpscaleJob,
   UpscaleSettings
 } from "../main/types";
@@ -37,15 +38,30 @@ function App() {
   const [module, setModule] = useState<ModuleId>("upscale");
   const [account, setAccount] = useState<AccountStatus | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
+  const [imageTasks, setImageTasks] = useState<ImageGenTask[]>([]);
   const dragDepth = useRef(0);
 
   useEffect(() => {
     void init();
-    const unsubscribe = window.upscaler.onJobsUpdated(setJobs);
-    return unsubscribe;
+    const unsubscribeJobs = window.upscaler.onJobsUpdated(setJobs);
+    const unsubscribeImages = window.upscaler.onImageTasksUpdated(setImageTasks);
+    return () => {
+      unsubscribeJobs();
+      unsubscribeImages();
+    };
     // init 只应在挂载时执行一次，依赖数组刻意留空。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 生图任务到达终态后刷新余额（主进程已把账户缓存失效，这里只需重取）。
+  const finishedImageCount = imageTasks.filter(
+    (task) => task.status === "succeeded" || task.status === "failed" || task.status === "cancelled"
+  ).length;
+  useEffect(() => {
+    if (finishedImageCount === 0) return;
+    const timer = setTimeout(() => void window.upscaler.getAccountStatus().then(setAccount), 1200);
+    return () => clearTimeout(timer);
+  }, [finishedImageCount]);
 
   // 窗口重新聚焦时刷新资源与任务状态，替代旧的手动“刷新状态”按钮。
   useEffect(() => {
@@ -69,14 +85,16 @@ function App() {
   }, [jobs]);
 
   async function init() {
-    const [assets, saved, currentJobs, info] = await Promise.all([
+    const [assets, saved, currentJobs, info, currentImageTasks] = await Promise.all([
       window.upscaler.getAssetStatus(),
       window.upscaler.getSettings(),
       window.upscaler.listJobs(),
-      window.upscaler.getAppInfo()
+      window.upscaler.getAppInfo(),
+      window.upscaler.listImageTasks()
     ]);
     setAssetStatus(assets);
     setJobs(currentJobs);
+    setImageTasks(currentImageTasks);
     setAppInfo(info);
     setSettings(saved);
     setSettingsLoaded(true);
@@ -139,6 +157,12 @@ function App() {
 
   function retryJob(job: UpscaleJob) {
     void window.upscaler.startJobs({ paths: [job.inputPath], settings: job.settings });
+  }
+
+  /** 「超分到 4K」联动：云端产物直接进本地超分队列并切到超分模块。 */
+  function upscaleImage(path: string) {
+    void window.upscaler.startJobs({ paths: [path], settings });
+    setModule("upscale");
   }
 
   // 拖拽计数：dragleave 在进入子元素时也会触发，必须配对计数才能避免高亮闪烁。
@@ -311,9 +335,16 @@ function App() {
         ) : null}
 
         {module === "imagegen" ? (
-          <ImageGenModule account={account} onGoSettings={() => setModule("settings")} />
+          <ImageGenModule
+            account={account}
+            tasks={imageTasks}
+            onGoSettings={() => setModule("settings")}
+            onUpscale={upscaleImage}
+          />
         ) : null}
-        {module === "assets" ? <AssetsModule jobs={jobs} onCompare={setCompareJob} /> : null}
+        {module === "assets" ? (
+          <AssetsModule jobs={jobs} imageTasks={imageTasks} onCompare={setCompareJob} onUpscale={upscaleImage} />
+        ) : null}
         {module === "settings" ? (
           <SettingsModule
             account={account}
@@ -665,60 +696,279 @@ function SettingsModule({
   );
 }
 
-function ImageGenModule({ account, onGoSettings }: { account: AccountStatus | null; onGoSettings: () => void }) {
+const IMAGE_SIZE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "1024x1024", label: "方形 1024" },
+  { value: "1536x1024", label: "横版 1536×1024" },
+  { value: "1024x1536", label: "竖版 1024×1536" }
+];
+
+/** 从账户可用模型里挑出生图模型；没有匹配时全量展示（不同分组命名各异）。 */
+function pickImageModels(models: string[]): string[] {
+  const matched = models.filter((id) => /image|dall|flux|seedream|stable|sd3|cogview|wanx/i.test(id));
+  return matched.length > 0 ? matched : models;
+}
+
+function ImageGenModule({
+  account,
+  tasks,
+  onGoSettings,
+  onUpscale
+}: {
+  account: AccountStatus | null;
+  tasks: ImageGenTask[];
+  onGoSettings: () => void;
+  onUpscale: (path: string) => void;
+}) {
+  const models = useMemo(() => pickImageModels(account?.models ?? []), [account]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [size, setSize] = useState(IMAGE_SIZE_OPTIONS[0]!.value);
+  const [count, setCount] = useState(1);
+
+  // 派生生效模型：所选模型不在列表里（换 Key/刷新）时自动落到第一个，无需同步 effect。
+  const model = selectedModel && models.includes(selectedModel) ? selectedModel : (models[0] ?? "");
+
+  const connected = Boolean(account?.connected);
+  const canGenerate = connected && model.length > 0 && prompt.trim().length > 0;
+
+  function generate() {
+    if (!canGenerate) return;
+    void window.upscaler.startImageTask({ model, prompt: prompt.trim(), size, count });
+  }
+
   return (
     <>
       <div className="module-head">
         <div>
           <h1>AI 生图</h1>
-          <p>用中转站的云端模型生成图片</p>
+          <p>云端模型生成图片，产物自动保存到本机资产库</p>
         </div>
+        {connected ? <span className="key-status ok">模型 {models.length} 个可用</span> : null}
       </div>
-      {account?.connected ? (
-        <div className="panel empty">
-          生图工作台即将上线。账户已就绪，可用模型 {account.models.length} 个。
-        </div>
-      ) : (
+
+      {!connected ? (
         <div className="panel empty">
           <p>连接 rivermoon7.com 账户后即可生成图片。</p>
           <button className="primary" onClick={onGoSettings}>
             去连接账户
           </button>
         </div>
+      ) : (
+        <>
+          <section className="panel gen-controls">
+            <div className="gen-row">
+              <label>
+                模型
+                <select value={model} onChange={(event) => setSelectedModel(event.target.value)}>
+                  {models.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                尺寸
+                <select value={size} onChange={(event) => setSize(event.target.value)}>
+                  {IMAGE_SIZE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                数量
+                <select value={count} onChange={(event) => setCount(Number(event.target.value))}>
+                  {[1, 2, 3, 4].map((value) => (
+                    <option key={value} value={value}>
+                      {value} 张
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="gen-prompt-row">
+              <textarea
+                rows={3}
+                placeholder="描述你想要的画面，例如：一只鲸鱼漂浮在星空城市上方，水彩风格"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+              />
+              <button className="primary gen-btn" disabled={!canGenerate} onClick={generate}>
+                生成
+              </button>
+            </div>
+          </section>
+
+          <ImageTaskList tasks={tasks} onUpscale={onUpscale} />
+        </>
       )}
     </>
   );
 }
 
-function AssetsModule({ jobs, onCompare }: { jobs: UpscaleJob[]; onCompare: (job: UpscaleJob) => void }) {
-  const outputs = jobs.filter((job) => job.status === "succeeded" && job.outputPath);
+function ImageTaskList({ tasks, onUpscale }: { tasks: ImageGenTask[]; onUpscale: (path: string) => void }) {
+  const hasFinished = tasks.some((task) => task.status !== "running" && task.status !== "queued");
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h2>
+          生成记录 <span className="count-badge">{tasks.length}</span>
+        </h2>
+        {hasFinished ? (
+          <button className="link-button" onClick={() => void window.upscaler.clearFinishedImageTasks()}>
+            清空已结束
+          </button>
+        ) : null}
+      </div>
+      {tasks.length === 0 ? (
+        <div className="empty">还没有生成记录，写一段提示词试试。</div>
+      ) : (
+        <div className="job-list">
+          {tasks.map((task) => (
+            <ImageTaskCard key={task.id} task={task} onUpscale={onUpscale} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ImageTaskCard({ task, onUpscale }: { task: ImageGenTask; onUpscale: (path: string) => void }) {
+  const active = task.status === "running" || task.status === "queued";
+  const promptPreview = task.params.prompt.length > 64 ? `${task.params.prompt.slice(0, 64)}…` : task.params.prompt;
+
+  return (
+    <article className={`job ${task.status}`}>
+      <div className="job-head">
+        <div className="job-title">
+          <h3>{promptPreview}</h3>
+          <p>
+            {task.params.model} · {task.params.size.replace("x", "×")} · {task.params.count} 张
+            {active ? ` · ${task.message}` : ""}
+          </p>
+        </div>
+        <span className={`pill ${task.status}`}>{statusText(task.status)}</span>
+      </div>
+
+      {active ? (
+        <div className="progress indeterminate" role="progressbar" aria-label="生成中">
+          <div />
+        </div>
+      ) : null}
+
+      {task.outputPaths.length > 0 ? (
+        <div className="gen-outputs">
+          {task.outputPaths.map((outputPath) => (
+            <div key={outputPath} className="gen-output">
+              <Thumb path={outputPath} max={320} className="thumb-gen" />
+              <div className="gen-output-actions">
+                <button className="secondary sm" onClick={() => onUpscale(outputPath)}>
+                  超分到 4K
+                </button>
+                <button className="secondary sm" onClick={() => void window.upscaler.reveal(outputPath)}>
+                  打开位置
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {task.status === "failed" && task.error ? (
+        <div className="job-error">
+          <span>{task.error}</span>
+          <div className="job-error-actions">
+            {task.needsTopup ? (
+              <button className="primary sm" onClick={() => void window.upscaler.openTopup()}>
+                去充值
+              </button>
+            ) : null}
+            <button className="secondary sm" onClick={() => void window.upscaler.startImageTask(task.params)}>
+              重试
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="job-meta">
+        {task.durationMs != null ? <span>耗时 {formatDuration(task.durationMs)}</span> : null}
+        {active ? (
+          <button className="secondary sm" onClick={() => void window.upscaler.cancelImageTask(task.id)}>
+            取消
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+type AssetItem =
+  | { kind: "upscale"; path: string; createdAt: number; job: UpscaleJob }
+  | { kind: "image"; path: string; createdAt: number };
+
+function AssetsModule({
+  jobs,
+  imageTasks,
+  onCompare,
+  onUpscale
+}: {
+  jobs: UpscaleJob[];
+  imageTasks: ImageGenTask[];
+  onCompare: (job: UpscaleJob) => void;
+  onUpscale: (path: string) => void;
+}) {
+  const items = useMemo<AssetItem[]>(() => {
+    const fromJobs = jobs
+      .filter((job) => job.status === "succeeded" && job.outputPath)
+      .map((job) => ({ kind: "upscale" as const, path: job.outputPath!, createdAt: job.createdAt, job }));
+    const fromImages = imageTasks
+      .filter((task) => task.status === "succeeded")
+      .flatMap((task) =>
+        task.outputPaths.map((path, index) => ({ kind: "image" as const, path, createdAt: task.createdAt + index }))
+      );
+    return [...fromJobs, ...fromImages].sort((a, b) => b.createdAt - a.createdAt);
+  }, [jobs, imageTasks]);
+
   return (
     <>
       <div className="module-head">
         <div>
           <h1>资产库</h1>
-          <p>本机产出的所有图片</p>
+          <p>本机产出的所有图片：超分输出与云端生成</p>
         </div>
       </div>
-      {outputs.length === 0 ? (
-        <div className="panel empty">还没有产出。跑一次超分，结果会出现在这里。</div>
+      {items.length === 0 ? (
+        <div className="panel empty">还没有产出。跑一次超分或生图，结果会出现在这里。</div>
       ) : (
         <div className="asset-grid">
-          {outputs.map((job) => (
-            <div className="asset-card" key={job.id}>
-              <Thumb path={job.outputPath!} max={320} className="thumb-asset" />
-              <span className="asset-name">{basename(job.outputPath!)}</span>
+          {items.map((item) => (
+            <div className="asset-card" key={`${item.kind}-${item.path}`}>
+              <Thumb path={item.path} max={320} className="thumb-asset" />
+              <span className="asset-name">{basename(item.path)}</span>
               <div className="asset-meta">
-                <span>
-                  {job.targetDimensions ? `${job.targetDimensions.width}×${job.targetDimensions.height}` : ""}
-                </span>
-                {job.outputBytes != null ? <span>{formatBytes(job.outputBytes)}</span> : null}
+                <span className="kind-tag">{item.kind === "upscale" ? "超分" : "生图"}</span>
+                {item.kind === "upscale" && item.job.targetDimensions ? (
+                  <span>
+                    {item.job.targetDimensions.width}×{item.job.targetDimensions.height}
+                  </span>
+                ) : null}
+                {item.kind === "upscale" && item.job.outputBytes != null ? (
+                  <span>{formatBytes(item.job.outputBytes)}</span>
+                ) : null}
               </div>
               <div className="asset-actions">
-                <button className="secondary sm" onClick={() => onCompare(job)}>
-                  对比
-                </button>
-                <button className="secondary sm" onClick={() => void window.upscaler.reveal(job.outputPath!)}>
+                {item.kind === "upscale" ? (
+                  <button className="secondary sm" onClick={() => onCompare(item.job)}>
+                    对比
+                  </button>
+                ) : (
+                  <button className="secondary sm" onClick={() => onUpscale(item.path)}>
+                    超分到 4K
+                  </button>
+                )}
+                <button className="secondary sm" onClick={() => void window.upscaler.reveal(item.path)}>
                   打开位置
                 </button>
               </div>

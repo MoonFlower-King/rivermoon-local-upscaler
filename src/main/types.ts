@@ -89,6 +89,32 @@ export type StartJobsPayload = {
   settings: UpscaleSettings;
 };
 
+/** 云端生图任务参数（经 sanitizeImageParams 规整后）。 */
+export type ImageGenParams = {
+  model: string;
+  prompt: string;
+  /** 形如 "1024x1024"。 */
+  size: string;
+  /** 单次生成张数 1-4。 */
+  count: number;
+};
+
+export type ImageGenTask = {
+  id: string;
+  params: ImageGenParams;
+  status: JobStatus;
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  durationMs: number | null;
+  message: string;
+  error: string | null;
+  /** 余额不足导致的失败：UI 显示充值引导。 */
+  needsTopup: boolean;
+  /** 落盘到资产库的图片绝对路径。 */
+  outputPaths: string[];
+};
+
 /** 中转站账户状态。渲染层只能拿到掩码 Key，永不接触明文。 */
 export type AccountStatus = {
   connected: boolean;
@@ -131,4 +157,10 @@ export interface UpscalerApi {
   clearRelayKey(): Promise<AccountStatus>;
   /** 打开充值页（主进程白名单校验，仅允许 rivermoon7.com）。 */
   openTopup(): Promise<void>;
+  /** 云端生图任务。start 返回 null 表示参数非法（如空 prompt）。 */
+  startImageTask(params: ImageGenParams): Promise<ImageGenTask | null>;
+  listImageTasks(): Promise<ImageGenTask[]>;
+  cancelImageTask(id: string): Promise<void>;
+  clearFinishedImageTasks(): Promise<void>;
+  onImageTasksUpdated(callback: (tasks: ImageGenTask[]) => void): () => void;
 }

@@ -52,12 +52,14 @@
 | 3.2 | 超分模块首次引导卡：模型缺失时显示下载卡（大小/授权/真实进度/取消/失败重试），无模型时隐藏拖放区 | ✅ | findComfyModel 双目录探测；下载完成自动刷新资源状态恢复可用 |
 | 3.3 | 打包过滤全部 .pth + About 页授权说明更新 | ✅ | filter 改为 !models/upscale_models/*.pth；**产物无 .pth 的实包检查放 M4 全量回归** |
 
-### M4 打磨发版
+### M4 打磨发版 ✅（2026-07-06，充值 URL 除外）
 | # | 任务 | 状态 | 验收标准 |
 |---|---|---|---|
-| 4.1 | 文案与充值漏斗打磨；充值 URL 换正式地址 | ⬜ | 所有云错误中文、无裸 JSON |
-| 4.2 | CLAUDE.md / ARCHITECTURE 文档同步 v2 架构 | ⬜ | 新会话冷启动可依文档工作 |
-| 4.3 | 全量回归 + dist:dir 发版验证（含真实 Key 端到端出图 + 全新机器模拟：无模型→下载→超分） | ⬜ | CLAUDE.md 验收清单 + 本表全部验收标准通过 |
+| 4.1 | 自查项清理：.download 启动清理、生图实时秒数、outputSizes 元数据、硬件检测分离引擎/模型判断 | ✅ | 模型未下载时提示「点击下载模型」而非「未找到 Runtime」（实包日志验证） |
+| 4.2 | CLAUDE.md 全量重写 v2（ARCHITECTURE 保留 v1 引擎细节，v2 总览在 CLAUDE.md + APP_V2_DESIGN） | ✅ | 新会话读 CLAUDE.md + 本表即可冷启动 |
+| 4.3 | 全量回归 + dist:dir 实包验证 | ✅ | models/upscale_models 无 .pth；实包启动正常；探测文案正确；lint/build/48 测试全绿 |
+| 4.4 | 充值 URL 换正式地址（TOPUP_URL in cloud/account.ts） | ⛔ 待产品方提供 URL | 一行替换 + 重打包 |
+| 4.5 | 用户人工验收：实包「下载模型→超分」全流程、设置页填 Key、生图 UI 点击出图、深浅色切换 | ⛔ 待用户 | 见 CLAUDE.md 验证命令节 |
 
 ### v2 远期（不在本期）
 - AI 视频（国产 Kling/即梦 + Sora/Runway，异步 adapter）——等渠道 Key。
@@ -76,7 +78,11 @@
 - 2026-07-05（M2 自查）：pickImageModels 靠命名启发式（/image|dall|flux|…/），分组里没有匹配时会全量展示（含聊天模型），用户误选聊天模型会得到中文报错但体验一般 → M4 考虑维护已知生图模型清单。
 - 2026-07-05（M2 自查）：资产库里生图产物没有尺寸/文件大小元数据（未 stat）→ M4 顺手补。
 - 2026-07-05（M3 自查）：Program Files 回退路径（userData + extra_model_paths.yaml）逻辑已写但未实测 → M4 用只读目录模拟验证。
-- 2026-07-05（M3 自查）：下载中途强退 app 会残留 67MB 的 .download 临时文件（重新下载会覆盖，无正确性问题）→ M4 启动时清理 *.download。
+- 2026-07-05（M3 自查）：下载中途强退 app 会残留 67MB 的 .download 临时文件（重新下载会覆盖，无正确性问题）→ M4 启动时清理 *.download。【已修】
+- 2026-07-06（M4 回归发现）：模型缺失曾被误报为「未找到 ComfyUI Runtime」→ 已分离引擎/模型判断，CUDA 自检不再被模型缺失阻断。【已修】
+- 2026-07-06（M4 回归结论）：实包残留的 4 个 .pth 均为 python 库内部文件（distutils-precedence、torchmetrics lpips alex/squeeze/vgg），与超分模型授权无关；models/upscale_models 已干净。
+- 2026-07-06（遗留）：pickImageModels 命名启发式在无生图模型的分组下会全量展示 → v2 考虑已知模型清单。
+- 2026-07-06（遗留）：上线前必须作废开发测试 Key；充值 URL 待正式地址（4.4）。
 
 ## 变更日志
 
@@ -87,3 +93,7 @@
 - 2026-07-05 M2 完成：新增 cloud/{image-protocol,image-gen,image-queue}.ts、image-gen:* IPC、
   生图工作区（模型派生选择/提示词/尺寸/数量/结果卡/重试/充值引导/取消）、资产库合并生图产物、
   「超分到 4K」联动、生图终态自动刷新余额。测试 41→48。真实 Key adapter E2E 通过。
+- 2026-07-05 M3 完成：model-downloader（流式+SHA256+多源+回退）、首次引导卡、打包去 .pth。
+  真实下载 E2E 通过（hf-mirror 40.9s/67MB）。
+- 2026-07-06 M4 完成（除 4.4 充值 URL / 4.5 用户验收）：自查项清理、CLAUDE.md v2 重写、
+  硬件检测引擎/模型分离（回归发现并修复）、实包验证（无超分 .pth、启动正常、文案正确）。

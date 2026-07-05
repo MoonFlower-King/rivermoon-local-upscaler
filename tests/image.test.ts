@@ -11,8 +11,13 @@ describe("computeTargetDimensions", () => {
     expect(computeTargetDimensions({ width: 1000, height: 500 }, 2000, 4)).toEqual({ width: 2000, height: 1000 });
   });
 
-  it("仅放大、绝不缩小：原图长边已超过 maxSide 时保持原尺寸", () => {
-    expect(computeTargetDimensions({ width: 5000, height: 4000 }, 4096, 4)).toEqual({ width: 5000, height: 4000 });
+  it("与网页版一致：原图长边超过 maxSide 时缩小到 maxSide（4x 输出经 Lanczos 缩回=超采样）", () => {
+    // 长边 5000 > 4096 → scale = 4096/5000 = 0.8192
+    expect(computeTargetDimensions({ width: 5000, height: 4000 }, 4096, 4)).toEqual({ width: 4096, height: 3277 });
+  });
+
+  it("长边恰好等于 maxSide 时保持原尺寸", () => {
+    expect(computeTargetDimensions({ width: 4096, height: 2048 }, 4096, 4)).toEqual({ width: 4096, height: 2048 });
   });
 
   it("输出至少 1 像素", () => {

@@ -422,7 +422,7 @@ function SettingsPanel({
           <label className="radio-row">
             <input type="radio" name="size-mode" checked={sizeMode === "web"} onChange={() => selectMode("web")} />
             <span>
-              贴近网页版<small>长边不超过 4096</small>
+              贴近网页版<small>输出长边统一为 4096（大图缩小到 4096，与网页版一致）</small>
             </span>
           </label>
           <label className="radio-row">
@@ -735,9 +735,10 @@ function CompareModal({ job, onClose }: { job: UpscaleJob; onClose: () => void }
   useEffect(() => {
     let active = true;
     void (async () => {
+      // 对比弹窗走高清预览通道（4096 + q92），避免弹窗里的画质低于输出文件本身。
       const [inputPreview, outputPreview] = await Promise.all([
-        loadPreview(job.inputPath, 3072),
-        job.outputPath ? loadPreview(job.outputPath, 3072) : Promise.resolve(null)
+        loadPreview(job.inputPath, 4096, 92),
+        job.outputPath ? loadPreview(job.outputPath, 4096, 92) : Promise.resolve(null)
       ]);
       if (!active) return;
       setBefore(inputPreview);
@@ -970,8 +971,8 @@ function releasePreviewSlot(): void {
 }
 
 /** 经限流 + 缓存加载预览；失败（null）不缓存以便后续重试。 */
-async function loadPreview(path: string, maxSide: number): Promise<string | null> {
-  const key = `${path}:${maxSide}`;
+async function loadPreview(path: string, maxSide: number, quality = 80): Promise<string | null> {
+  const key = `${path}:${maxSide}:${quality}`;
   const cached = previewCache.get(key);
   if (cached !== undefined) {
     previewCache.delete(key);
@@ -980,7 +981,7 @@ async function loadPreview(path: string, maxSide: number): Promise<string | null
   }
   await acquirePreviewSlot();
   try {
-    const url = await window.upscaler.getPreview(path, maxSide);
+    const url = await window.upscaler.getPreview(path, maxSide, quality);
     if (url !== null) {
       previewCache.set(key, url);
       if (previewCache.size > PREVIEW_CACHE_MAX) {

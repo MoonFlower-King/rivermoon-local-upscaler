@@ -10,12 +10,13 @@ export function isSupportedImage(filePath: string): boolean {
 }
 
 /** 生成缩放后的预览图（base64 data URL），用于渲染层前后对比，避免暴露 file:// 路径。
- *  .rotate() 按 EXIF 朝向自动转正，避免手机竖拍图在预览里侧躺。 */
-export async function previewDataUrl(filePath: string, maxSide = 1200): Promise<string> {
+ *  .rotate() 按 EXIF 朝向自动转正，避免手机竖拍图在预览里侧躺。
+ *  quality 可调：缩略图用低质量省内存，对比弹窗用高质量保观感。 */
+export async function previewDataUrl(filePath: string, maxSide = 1200, quality = 80): Promise<string> {
   const buffer = await sharp(filePath)
     .rotate()
     .resize(maxSide, maxSide, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 80 })
+    .webp({ quality })
     .toBuffer();
   return `data:image/webp;base64,${buffer.toString("base64")}`;
 }
@@ -35,10 +36,11 @@ export async function readImageDimensions(filePath: string): Promise<ImageDimens
 
 export function computeTargetDimensions(input: ImageDimensions, maxSide: number, scale: number): ImageDimensions {
   const longest = Math.max(input.width, input.height);
-  // maxSide<=0 表示不限制，直接按倍数放大；否则把长边限制在 maxSide 内。
-  const cap = Number.isFinite(maxSide) && maxSide > 0 ? maxSide / longest : Infinity;
-  // 仅放大、绝不缩小：原图长边已超过 maxSide 时 cap<1，clamp 到 1 即保持原尺寸，不再压缩。
-  const upscale = Math.max(1, Math.min(scale, cap));
+  // 与网页版 compute_target_size 语义一致：
+  // maxSide<=0 表示真实倍数放大；否则输出长边统一限制到 maxSide——
+  // 原图长边超过 maxSide 时会「缩小」到 maxSide（4x 模型输出经 Lanczos 缩回，
+  // 相当于超采样，这正是网页版画面观感更干净锐利的来源之一）。
+  const upscale = Number.isFinite(maxSide) && maxSide > 0 ? Math.min(scale, maxSide / longest) : scale;
   return {
     width: Math.max(1, Math.round(input.width * upscale)),
     height: Math.max(1, Math.round(input.height * upscale))

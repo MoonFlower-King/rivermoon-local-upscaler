@@ -20,7 +20,8 @@ const api = {
   cancelJob: (id: string) => ipcRenderer.invoke("jobs:cancel", id),
   clearFinished: () => ipcRenderer.invoke("jobs:clear-finished"),
   reveal: (filePath: string) => ipcRenderer.invoke("shell:reveal", filePath),
-  getPreview: (filePath: string, maxSide?: number) => ipcRenderer.invoke("image:preview", filePath, maxSide),
+  getPreview: (filePath: string, maxSide?: number, quality?: number) =>
+    ipcRenderer.invoke("image:preview", filePath, maxSide, quality),
   onJobsUpdated: (callback: (jobs: UpscaleJob[]) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, jobs: unknown[]) => callback(jobs as UpscaleJob[]);
     ipcRenderer.on("jobs:updated", listener);

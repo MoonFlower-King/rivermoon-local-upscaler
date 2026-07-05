@@ -111,6 +111,6 @@ export interface UpscalerApi {
   cancelJob(id: string): Promise<UpscaleJob | null>;
   clearFinished(): Promise<void>;
   reveal(filePath: string): Promise<void>;
-  getPreview(filePath: string, maxSide?: number): Promise<string | null>;
+  getPreview(filePath: string, maxSide?: number, quality?: number): Promise<string | null>;
   onJobsUpdated(callback: (jobs: UpscaleJob[]) => void): () => void;
 }

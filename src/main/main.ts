@@ -226,10 +226,11 @@ function registerIpc(): void {
     await shell.showItemInFolder(filePath);
   });
 
-  ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number) => {
+  ipcMain.handle("image:preview", async (_event, filePath: unknown, maxSide?: number, quality?: number) => {
     if (!isAllowedPath(filePath)) return null;
+    const safeQuality = typeof quality === "number" && Number.isFinite(quality) ? Math.min(100, Math.max(1, Math.round(quality))) : 80;
     try {
-      return await previewDataUrl(filePath, maxSide ?? 1200);
+      return await previewDataUrl(filePath, maxSide ?? 1200, safeQuality);
     } catch {
       return null;
     }

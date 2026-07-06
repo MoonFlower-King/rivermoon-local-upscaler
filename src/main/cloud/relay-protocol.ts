@@ -71,6 +71,11 @@ export function parseUsageUsd(payload: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value / 100 : null;
 }
 
+/** 瞬时错误（上游 503/限流/网络抖动）值得自动重试；配额/鉴权/参数类立即上抛。 */
+export function isTransientRelayError(error: unknown): boolean {
+  return error instanceof RelayError && (error.kind === "server" || error.kind === "rate" || error.kind === "network");
+}
+
 /** 掩码展示 Key：只留前缀与末 4 位，渲染层只能见到这个。 */
 export function maskKey(key: string): string {
   if (key.length <= 8) return "sk-****";

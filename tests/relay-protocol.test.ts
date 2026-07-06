@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  RelayError,
   classifyRelayError,
   extractApiErrorMessage,
+  isTransientRelayError,
   maskKey,
   parseModelsResponse,
   parseSubscriptionUsd,
@@ -59,6 +61,17 @@ describe("billing 解析", () => {
     expect(parseSubscriptionUsd({})).toBeNull();
     expect(parseUsageUsd({ total_usage: 18 })).toBe(0.18);
     expect(parseUsageUsd({})).toBeNull();
+  });
+});
+
+describe("isTransientRelayError", () => {
+  it("server/rate/network 可重试；quota/auth/其他错误不可", () => {
+    expect(isTransientRelayError(new RelayError("server", "x"))).toBe(true);
+    expect(isTransientRelayError(new RelayError("rate", "x"))).toBe(true);
+    expect(isTransientRelayError(new RelayError("network", "x"))).toBe(true);
+    expect(isTransientRelayError(new RelayError("quota", "x"))).toBe(false);
+    expect(isTransientRelayError(new RelayError("auth", "x"))).toBe(false);
+    expect(isTransientRelayError(new Error("x"))).toBe(false);
   });
 });
 

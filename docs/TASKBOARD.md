@@ -83,6 +83,10 @@
 - 2026-07-06（M4 回归结论）：实包残留的 4 个 .pth 均为 python 库内部文件（distutils-precedence、torchmetrics lpips alex/squeeze/vgg），与超分模型授权无关；models/upscale_models 已干净。
 - 2026-07-06（遗留）：pickImageModels 命名启发式在无生图模型的分组下会全量展示 → v2 考虑已知模型清单。
 - 2026-07-06（遗留）：上线前必须作废开发测试 Key；充值 URL 待正式地址（4.4）。
+- 2026-07-06（线上事件）：12:11-12:12 生图 503 集中报错——上游 codex 渠道瞬时过载约 1 分钟自愈，
+  多用户中招、失败未计费。app 侧已加瞬时错误自动重试（2s/5s 退避，仅 server/rate/network）。
+  **服务端待办（产品方）**：给 gpt-image-2 加备用渠道 + 失败重试次数设 2-3；单渠道期间慎开
+  「失败自动禁用」；排查 codex 渠道上游并发配额。
 
 ## 变更日志
 

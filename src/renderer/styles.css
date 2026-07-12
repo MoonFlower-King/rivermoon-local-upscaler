@@ -46,7 +46,8 @@
   --dot-gray: rgba(120, 120, 128, 0.8);
 
   --focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.35);
-  --shadow-1: 0 1px 2px rgba(20, 24, 30, 0.07);
+  /* 双层阴影：贴地 key + 弥散 ambient，卡片与 vibrancy 面板有真实浮起感。 */
+  --shadow-1: 0 1px 2px rgba(20, 24, 30, 0.06), 0 4px 14px rgba(20, 24, 30, 0.05);
   --shadow-2: 0 16px 48px rgba(20, 24, 30, 0.2);
   --scroll-thumb: rgba(0, 0, 0, 0.25);
   --backdrop: rgba(20, 24, 32, 0.3);
@@ -94,7 +95,7 @@
     --dot-gray: rgba(180, 180, 190, 0.8);
 
     --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.45);
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 4px 16px rgba(0, 0, 0, 0.22);
     --shadow-2: 0 20px 56px rgba(0, 0, 0, 0.55);
     --scroll-thumb: rgba(255, 255, 255, 0.26);
     --backdrop: rgba(0, 0, 0, 0.5);
@@ -373,8 +374,9 @@ input[type="range"] {
 .nav-group-label {
   padding: 0 10px 4px;
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.05em;
 }
 
 .nav-item {
@@ -389,6 +391,9 @@ input[type="range"] {
   font-size: 13px;
   font-weight: 500;
   text-align: left;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
 }
 
 .nav-item svg {
@@ -1761,7 +1766,8 @@ input[type="range"] {
 .agent-conversation-meta,
 .agent-conversation-time {
   color: var(--text-3);
-  font-size: 11px;
+  /* 正文型辅助信息不低于 12px（11px 只留给装饰性标签），深色下可读性达标。 */
+  font-size: 12px;
 }
 
 .agent-history-list {
@@ -1785,16 +1791,30 @@ input[type="range"] {
   text-align: left;
 }
 
-.agent-conversation.on {
-  background: var(--accent);
-  color: var(--on-accent);
+.agent-conversation {
+  transition:
+    background 130ms ease,
+    border-color 130ms ease;
+}
+
+.agent-conversation:hover {
+  border-color: var(--separator-strong);
+  background: var(--control-bg);
+}
+
+/* 选中态与 nav-item.on / seg .on 同语言：浅蓝胶囊底 + 强调色文字，
+   不用大面积实心蓝（vibrancy 浅色界面里过重，且此前硬编码了白色文字）。 */
+.agent-conversation.on,
+.agent-conversation.on:hover {
+  background: var(--blue-bg);
+  color: var(--accent);
   border-color: transparent;
 }
 
 .agent-conversation.on .agent-conversation-preview,
 .agent-conversation.on .agent-conversation-meta,
 .agent-conversation.on .agent-conversation-time {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--text-2);
 }
 
 .agent-conversation-title {

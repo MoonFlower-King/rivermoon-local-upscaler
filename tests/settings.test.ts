@@ -8,10 +8,18 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings("garbage")).toEqual(DEFAULT_SETTINGS);
   });
 
-  it("非法 outputFormat 归一为 png，合法值保留", () => {
+  it("outputFormat 固定为 worker SaveImage PNG", () => {
     expect(sanitizeSettings({ outputFormat: "gif" } as unknown).outputFormat).toBe("png");
-    expect(sanitizeSettings({ outputFormat: "webp" }).outputFormat).toBe("webp");
-    expect(sanitizeSettings({ outputFormat: "jpg" }).outputFormat).toBe("jpg");
+    expect(sanitizeSettings({ outputFormat: "auto" }).outputFormat).toBe("png");
+    expect(sanitizeSettings({ outputFormat: "webp" }).outputFormat).toBe("png");
+    expect(sanitizeSettings({ outputFormat: "jpg" }).outputFormat).toBe("png");
+  });
+
+  it("所有非 AI 超分 processingMode 都归一为默认 AI 超分", () => {
+    expect(sanitizeSettings({ processingMode: "remoteAi" } as unknown).processingMode).toBe("aiUpscale");
+    expect(sanitizeSettings({ processingMode: "aiUpscale" }).processingMode).toBe("aiUpscale");
+    expect(sanitizeSettings({ processingMode: "aiUpscaleWebClear" }).processingMode).toBe("aiUpscale");
+    expect(sanitizeSettings({ processingMode: "webClear" }).processingMode).toBe("aiUpscale");
   });
 
   it("maxSide <=0 视为不限制(0)，否则夹到 [256, 16384]", () => {
@@ -28,8 +36,8 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings({ outputDirectory: "D:/out" }).outputDirectory).toBe("D:/out");
   });
 
-  it("忽略已废弃的多余字段，只保留三项", () => {
+  it("忽略已废弃的多余字段，只保留当前设置项", () => {
     const result = sanitizeSettings({ outputFormat: "png", model: "x", scale: 2, engineMode: "y" } as unknown);
-    expect(result).toEqual({ outputFormat: "png", outputDirectory: null, maxSide: 4096 });
+    expect(result).toEqual({ processingMode: "aiUpscale", outputFormat: "png", outputDirectory: null, maxSide: 4096 });
   });
 });

@@ -1,10 +1,11 @@
-import type { ImageFormat, UpscaleSettings } from "./types.js";
+import type { ProcessingMode, UpscaleSettings } from "./types.js";
 
 /** 产品固定常量：网站同款 AI 链路只用 4x-UltraSharp，按 4x 放大。 */
 export const DEFAULT_MODEL = "4x-UltraSharp.pth";
 export const DEFAULT_SCALE = 4;
 
 export const DEFAULT_SETTINGS: UpscaleSettings = {
+  processingMode: "aiUpscale",
   outputFormat: "png",
   outputDirectory: null,
   maxSide: 4096
@@ -15,15 +16,17 @@ export function sanitizeSettings(input: unknown): UpscaleSettings {
   const settings = (input && typeof input === "object" ? input : {}) as Partial<UpscaleSettings>;
   const merged = { ...DEFAULT_SETTINGS, ...settings };
   return {
-    outputFormat: normalizeFormat(merged.outputFormat),
+    processingMode: normalizeProcessingMode(merged.processingMode),
+    outputFormat: "png",
     outputDirectory:
       typeof merged.outputDirectory === "string" && merged.outputDirectory ? merged.outputDirectory : null,
     maxSide: normalizeMaxSide(merged.maxSide)
   };
 }
 
-function normalizeFormat(value: unknown): ImageFormat {
-  return value === "jpg" || value === "png" || value === "webp" ? value : "png";
+function normalizeProcessingMode(value: unknown): ProcessingMode {
+  if (value === "aiUpscale") return value;
+  return DEFAULT_SETTINGS.processingMode;
 }
 
 /** 最大长边：<=0 视为不限制（返回 0），否则夹到 [256, 16384]。 */

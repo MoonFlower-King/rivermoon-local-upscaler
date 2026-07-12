@@ -63,7 +63,8 @@ export function normalizeJob(value: unknown, now: number = Date.now()): UpscaleJ
     dimensions: isDimensions(raw.dimensions) ? raw.dimensions : null,
     targetDimensions: isDimensions(raw.targetDimensions) ? raw.targetDimensions : null,
     // 旧版 jobs.json 里的 tileSize 等历史字段在此静默丢弃。
-    outputBytes: typeof raw.outputBytes === "number" && Number.isFinite(raw.outputBytes) ? Math.max(0, raw.outputBytes) : null
+    outputBytes:
+      typeof raw.outputBytes === "number" && Number.isFinite(raw.outputBytes) ? Math.max(0, raw.outputBytes) : null
   };
 }
 
@@ -79,7 +80,9 @@ export function normalizeDuration(
 }
 
 function isStatus(value: unknown): value is UpscaleJob["status"] {
-  return value === "queued" || value === "running" || value === "succeeded" || value === "failed" || value === "cancelled";
+  return (
+    value === "queued" || value === "running" || value === "succeeded" || value === "failed" || value === "cancelled"
+  );
 }
 
 function isDimensions(value: unknown): value is UpscaleJob["dimensions"] {

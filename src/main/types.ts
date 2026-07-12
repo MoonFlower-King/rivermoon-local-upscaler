@@ -1,6 +1,9 @@
-export type ImageFormat = "png" | "jpg" | "webp";
+export type ImageFormat = "auto" | "png" | "jpg" | "webp";
+export type ConcreteImageFormat = Exclude<ImageFormat, "auto">;
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type ProcessingMode = "webClear" | "aiUpscale" | "aiUpscaleWebClear";
 
 /** 资源状态卡片用的质量档位标识（当前固定 standard = 网站同款 AI）。 */
 export type QualityMode = "standard";
@@ -11,6 +14,7 @@ export type QualityMode = "standard";
  * 见 settings.ts 的 DEFAULT_MODEL / DEFAULT_SCALE，不再作为可配置字段。
  */
 export type UpscaleSettings = {
+  processingMode: ProcessingMode;
   outputFormat: ImageFormat;
   outputDirectory: string | null;
   /** 输出长边上限；0 = 不限制（真实放大倍数）。 */
@@ -89,6 +93,51 @@ export type StartJobsPayload = {
   settings: UpscaleSettings;
 };
 
+export type ImageGenEndpoint = "generation" | "edit" | "reference_edit";
+export type ImageQuality = "low" | "medium" | "high" | "auto";
+export type ImageOutputFormat = "png" | "jpeg" | "webp";
+export type ImageFitMode = "contain" | "cover";
+export type ImageSizeMode = "postprocess" | "native";
+
+export type ImageContractModel = {
+  publicName: string;
+  internalName: string;
+  label: string;
+  visible: boolean;
+  primary: boolean;
+  endpoints: ImageGenEndpoint[];
+  sizes: string[];
+  qualities: ImageQuality[];
+  outputFormats: ImageOutputFormat[];
+  maxReferences: number;
+  maxReferenceBytes: number;
+  maxBodyBytes: number;
+  supportsMask: boolean;
+  supportsMultipleReferences: boolean;
+  customSize: {
+    enabled: boolean;
+    minDimension: number;
+    maxDimension: number;
+    maxPixels: number;
+    allowedRatios: string[];
+    nativeRatiosOnly: boolean;
+    mode: string | null;
+    warning: string | null;
+  };
+  sizeModes: ImageSizeMode[];
+  nativeRecommendedSizes: string[];
+  notice: string | null;
+};
+
+export type ImageContract = {
+  ok: boolean;
+  models: ImageContractModel[];
+  defaultModelId: string | null;
+  contractVersion: string | null;
+  fetchedAt: number;
+  error: string | null;
+};
+
 /** 云端生图任务参数（经 sanitizeImageParams 规整后）。 */
 export type ImageGenParams = {
   model: string;
@@ -97,6 +146,12 @@ export type ImageGenParams = {
   size: string;
   /** 单次生成张数 1-4。 */
   count: number;
+  quality: ImageQuality;
+  outputFormat: ImageOutputFormat;
+  fitMode: ImageFitMode;
+  sizeMode: ImageSizeMode;
+  /** 参考图路径；非空时走网站同款 /v1/images/edits。 */
+  referencePaths: string[];
 };
 
 export type ImageGenTask = {
@@ -115,6 +170,170 @@ export type ImageGenTask = {
   outputPaths: string[];
   /** 与 outputPaths 逐项对齐的文件大小（字节）；stat 失败为 0。 */
   outputSizes: number[];
+};
+
+export type VideoTaskStatus = JobStatus | "expired";
+
+export type VideoEndpoint = "text_to_video" | "image_to_video" | "reference_to_video" | "first_last_frame";
+
+export type VideoReferenceType = "ordinary" | "reference" | "first_frame" | "last_frame" | "character" | "style";
+
+export type VideoContractModel = {
+  id: string;
+  label: string;
+  family: string;
+  enabled: boolean;
+  endpoints: VideoEndpoint[];
+  aspectRatios: string[];
+  durations: number[];
+  resolutions: string[];
+  maxReferences: number;
+  referenceTypes: VideoReferenceType[];
+  /** UI 使用规范化 endpoint；提交远端时按合同保留每个 endpoint 对应的原始值。 */
+  requestEndpoints: Partial<Record<VideoEndpoint, string>>;
+  primary: boolean;
+  defaultAspectRatio: string | null;
+  defaultDuration: number | null;
+  defaultResolution: string | null;
+  estimatedPriceUsd: number | null;
+  notice: string | null;
+};
+
+export type VideoContract = {
+  ok: boolean;
+  models: VideoContractModel[];
+  defaultModelId: string | null;
+  fetchedAt: number;
+  error: string | null;
+  fromCache: boolean;
+  source: "https" | "http" | "cache" | "unknown";
+};
+
+export type VideoGatewayDiagnostics = {
+  checkedAt: number;
+  host: string;
+  dnsAddresses: string[];
+  https: {
+    ok: boolean;
+    status: number | null;
+    durationMs: number;
+    modelCount: number | null;
+    contractVersion: string | null;
+    error: string | null;
+  };
+  httpFallback: {
+    ok: boolean;
+    status: number | null;
+    durationMs: number;
+    error: string | null;
+  };
+};
+
+export type VideoGenParams = {
+  model: string;
+  prompt: string;
+  endpoint: VideoEndpoint;
+  /** 主进程按视频合同写入；用于保留 multi_reference 等服务端原始 endpoint 名。 */
+  requestEndpoint?: string;
+  aspectRatio: string;
+  duration: number;
+  resolution: string;
+  referencePaths: string[];
+  /** 兼容旧任务；新提交以 referenceTypes 逐图标记为准。 */
+  referenceType: VideoReferenceType;
+  referenceTypes: VideoReferenceType[];
+};
+
+export type VideoSourceSelection = {
+  paths: string[];
+  rejected: string[];
+};
+
+export type ImageSourceSelection = {
+  paths: string[];
+  rejected: string[];
+};
+
+export type VideoGenTask = {
+  id: string;
+  params: VideoGenParams;
+  status: VideoTaskStatus;
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  durationMs: number | null;
+  message: string;
+  error: string | null;
+  needsTopup: boolean;
+  progress: number | null;
+  remoteJobId: string | null;
+  requestId: string | null;
+  clientRequestId: string | null;
+  dryRun: boolean;
+  outputPath: string | null;
+  outputBytes: number | null;
+  contentUrl: string | null;
+  downloadUrl: string | null;
+  costUsd: number | null;
+  estimatedCostUsd: number | null;
+  charged: boolean;
+  refunded: boolean;
+};
+
+export type AgentRole = "user" | "assistant";
+export type AgentReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
+
+export type AgentAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+  width?: number;
+  height?: number;
+  size?: number;
+};
+
+export type AgentMessage = {
+  id: string;
+  role: AgentRole;
+  content: string;
+  createdAt: number;
+  attachments?: AgentAttachment[];
+};
+
+export type AgentConversation = {
+  id: string;
+  title: string;
+  messages: AgentMessage[];
+  model: string;
+  reasoningEffort: AgentReasoningEffort;
+  preview: string;
+  renamed: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type AgentChatRequest = {
+  requestId: string;
+  model: string;
+  reasoningEffort: AgentReasoningEffort;
+  messages: AgentMessage[];
+};
+
+export type AgentChatResult = {
+  ok: boolean;
+  content: string;
+  error: string | null;
+  needsTopup: boolean;
+};
+
+export type AgentChatEvent = {
+  requestId: string;
+  delta?: string;
+  done?: boolean;
+  content?: string;
+  error?: string;
+  needsTopup?: boolean;
 };
 
 /** 超分模型下载状态（安装包不含权重，用户界面内自主下载）。 */
@@ -146,20 +365,45 @@ export type AccountStatus = {
   error: string | null;
 };
 
+export type UpdateCheckSource = "github-release" | "github-tag" | "none";
+
+export type UpdateInfo = {
+  ok: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  hasUpdate: boolean;
+  releaseUrl: string | null;
+  source: UpdateCheckSource;
+  checkedAt: number;
+  error: string | null;
+};
+
+export type RendererReadyPayload = {
+  activeModule: string;
+  modules: string[];
+  videoNav: boolean;
+};
+
 /**
  * preload 经 contextBridge 暴露到 window.upscaler 的 API 契约。
  * preload（实现）与 renderer 的 global.d.ts（声明）共用此接口，避免两处定义漂移。
  */
 export interface UpscalerApi {
+  reportRendererReady(payload: RendererReadyPayload): void;
   getPathForFile(file: File): string;
   getAssetStatus(): Promise<AssetStatus>;
   probeHardware(force?: boolean): Promise<HardwareReport>;
   getSettings(): Promise<UpscaleSettings>;
   saveSettings(settings: UpscaleSettings): Promise<UpscaleSettings>;
   getAppInfo(): Promise<AppInfo>;
+  checkForUpdates(): Promise<UpdateInfo>;
+  openUpdatePage(url: string): Promise<void>;
   exportLogs(): Promise<string | null>;
   revealLogs(): Promise<void>;
+  copyText(text: string): Promise<void>;
   selectFiles(): Promise<string[]>;
+  selectImageReferences(): Promise<ImageSourceSelection>;
+  selectVideoSources(): Promise<VideoSourceSelection>;
   selectFolder(): Promise<string[]>;
   selectOutputDirectory(): Promise<string | null>;
   discoverFiles(paths: string[]): Promise<string[]>;
@@ -177,11 +421,29 @@ export interface UpscalerApi {
   /** 打开充值页（主进程白名单校验，仅允许 rivermoon7.com）。 */
   openTopup(): Promise<void>;
   /** 云端生图任务。start 返回 null 表示参数非法（如空 prompt）。 */
+  getImageContract(): Promise<ImageContract>;
   startImageTask(params: ImageGenParams): Promise<ImageGenTask | null>;
   listImageTasks(): Promise<ImageGenTask[]>;
   cancelImageTask(id: string): Promise<void>;
   clearFinishedImageTasks(): Promise<void>;
   onImageTasksUpdated(callback: (tasks: ImageGenTask[]) => void): () => void;
+  /** 云端视频生成任务。 */
+  getVideoContract(): Promise<VideoContract>;
+  getVideoGatewayDiagnostics(): Promise<VideoGatewayDiagnostics>;
+  startVideoTask(params: VideoGenParams): Promise<VideoGenTask | null>;
+  listVideoTasks(): Promise<VideoGenTask[]>;
+  syncRecentVideoTasks(): Promise<VideoGenTask[]>;
+  cancelVideoTask(id: string): Promise<void>;
+  resumeVideoTask(id: string): Promise<VideoGenTask | null>;
+  retryVideoTask(id: string): Promise<VideoGenTask | null>;
+  clearFinishedVideoTasks(): Promise<void>;
+  onVideoTasksUpdated(callback: (tasks: VideoGenTask[]) => void): () => void;
+  /** GPT 对话模块。Key 只在主进程读取，渲染层只接收流式文本事件。 */
+  startAgentResponse(request: AgentChatRequest): Promise<AgentChatResult>;
+  cancelAgentResponse(requestId: string): Promise<void>;
+  onAgentResponseEvent(callback: (event: AgentChatEvent) => void): () => void;
+  /** 受主进程路径白名单保护的本地媒体 file:// URL，用于 video 预览。 */
+  getMediaUrl(filePath: string): Promise<string | null>;
   /** 超分模型按需下载。 */
   getModelStatus(): Promise<UpscaleModelStatus>;
   downloadModel(): Promise<void>;

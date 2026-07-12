@@ -3,7 +3,6 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { app } from "electron";
 import { outputExtension } from "./image.js";
 import {
   comfyInputRoot,
@@ -28,10 +27,10 @@ import {
   type ComfyProgressPayload,
   type ComfyPromptResponse
 } from "./comfy-protocol.js";
-import type { ImageDimensions, ImageFormat, UpscaleSettings } from "./types.js";
+import type { ConcreteImageFormat, ImageDimensions, UpscaleSettings } from "./types.js";
 
-const MANAGED_PORT = 18188;
-const MANAGED_URL = `http://127.0.0.1:${MANAGED_PORT}`;
+const DEFAULT_MANAGED_PORT = 18188;
+const WORKER_COMPATIBLE_PORT = 8188;
 const READY_TIMEOUT_MS = 180_000;
 /** 回退轮询模式下查询 history 的间隔。 */
 const POLL_INTERVAL_MS = 1500;
@@ -47,7 +46,7 @@ export type ComfyRunOptions = {
   settings: UpscaleSettings;
   inputDimensions: ImageDimensions;
   targetDimensions: ImageDimensions;
-  format: ImageFormat;
+  format: ConcreteImageFormat;
   signal: AbortSignal;
   onProgress?: (percent: number) => void;
 };
@@ -87,7 +86,7 @@ export function shutdownComfy(): void {
  * 立刻释放 GPU，而不是任由废弃任务在后台算完整张图。失败静默（ComfyUI 可能未在运行）。
  */
 export async function interruptComfy(): Promise<void> {
-  const url = activeComfyUrl ?? MANAGED_URL;
+  const url = activeComfyUrl ?? managedUrl();
   const promptId = activePromptId;
   try {
     await fetch(`${url}/interrupt`, { method: "POST", signal: AbortSignal.timeout(INTERRUPT_TIMEOUT_MS) });
@@ -118,7 +117,7 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
   const inputName = await copyInputToComfy(options.inputPath, jobId);
   const copiedInputPath = path.join(comfyInputRoot(), inputName);
   try {
-    const prefix = `rivermoon_desktop_ai/${jobId}`;
+    const prefix = `rivermoon_ai_${jobId}`;
     const prompt = buildStandardPrompt(inputName, DEFAULT_MODEL, options.targetDimensions, prefix);
     const clientId = `rivermoon-desktop-${crypto.randomUUID()}`;
 
@@ -147,13 +146,15 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
 }
 
 async function ensureComfyReady(signal: AbortSignal): Promise<string> {
-  // 只有开发环境显式开启时才允许复用外部 ComfyUI。打包版固定使用内置 runtime，避免误连到用户机器上的其他工作流。
-  if (!app.isPackaged && process.env.RIVERMOON_USE_EXTERNAL_COMFYUI === "1") {
-    const configuredUrl = process.env.RIVERMOON_COMFYUI_URL || process.env.COMFYUI_URL || "http://127.0.0.1:8188";
-    if (await isReady(configuredUrl)) return configuredUrl.replace(/\/$/, "");
+  const workerUrl = workerCompatibleComfyUrl();
+  if (workerUrl && (await isReady(workerUrl))) {
+    const url = workerUrl.replace(/\/$/, "");
+    log(`使用本机生产 ComfyUI url=${url} root=${comfyRuntimeRoot()}`);
+    return url;
   }
 
-  if (await isReady(MANAGED_URL)) return MANAGED_URL;
+  const url = managedUrl();
+  if (await isReady(url)) return url;
   if (!startupPromise) {
     startupPromise = startManagedComfy(signal).finally(() => {
       startupPromise = null;
@@ -181,7 +182,9 @@ async function startManagedComfy(signal: AbortSignal): Promise<string> {
 
   const logPath = path.join(logsRoot(), `comfyui-${Date.now()}.log`);
   const logFile = fs.openSync(logPath, "a");
-  const args = [mainPath, "--port", String(MANAGED_PORT), "--listen", "127.0.0.1"];
+  const port = managedPort();
+  const url = managedUrl();
+  const args = [mainPath, "--port", String(port), "--listen", "127.0.0.1"];
   // 模型落在 userData 回退目录时（runtime 不可写），把 extra_model_paths 挂给 ComfyUI。
   if (fs.existsSync(extraModelPathsConfig())) {
     args.push("--extra-model-paths-config", extraModelPathsConfig());
@@ -193,7 +196,7 @@ async function startManagedComfy(signal: AbortSignal): Promise<string> {
     stdio: ["ignore", logFile, logFile]
   });
   managedProcess = child;
-  log(`启动内置 ComfyUI runtime pid=${child.pid ?? "-"} log=${logPath}`);
+  log(`启动 ComfyUI runtime url=${url} root=${comfyRuntimeRoot()} pid=${child.pid ?? "-"} log=${logPath}`);
 
   // 用对象属性记录退出状态：闭包内赋值不受 TS 控制流窄化影响，就绪轮询里能即时读到。
   const exitState = { exited: false, code: null as number | null };
@@ -227,18 +230,18 @@ async function startManagedComfy(signal: AbortSignal): Promise<string> {
       signal.removeEventListener("abort", abort);
       throw new Error(
         `内置 ComfyUI 启动后立即退出（code=${exitState.code ?? "未知"}）。` +
-          `常见原因：端口 ${MANAGED_PORT} 被其他程序占用，或运行时文件损坏。启动日志：${logPath}`
+          `常见原因：端口 ${port} 被其他程序占用，或运行时文件损坏。启动日志：${logPath}`
       );
     }
-    if (await isReady(MANAGED_URL)) {
+    if (await isReady(url)) {
       signal.removeEventListener("abort", abort);
-      return MANAGED_URL;
+      return url;
     }
     await delay(1000);
   }
 
   signal.removeEventListener("abort", abort);
-  throw new Error("内置 ComfyUI 启动超时。请导出诊断日志查看 ComfyUI 启动输出。");
+  throw new Error("ComfyUI 启动超时。请导出诊断日志查看 ComfyUI 启动输出。");
 }
 
 async function isReady(url: string): Promise<boolean> {
@@ -250,10 +253,24 @@ async function isReady(url: string): Promise<boolean> {
   }
 }
 
+function workerCompatibleComfyUrl(): string | null {
+  const configured = process.env.RIVERMOON_COMFYUI_URL || process.env.COMFYUI_URL;
+  if (configured) return configured;
+  if (fs.existsSync(path.join("D:/ComfyUI", "main.py"))) return "http://127.0.0.1:8188";
+  return null;
+}
+
+function managedPort(): number {
+  return fs.existsSync(path.join("D:/ComfyUI", "main.py")) ? WORKER_COMPATIBLE_PORT : DEFAULT_MANAGED_PORT;
+}
+
+function managedUrl(): string {
+  return `http://127.0.0.1:${managedPort()}`;
+}
+
 async function copyInputToComfy(inputPath: string, jobId: string): Promise<string> {
   await fsp.mkdir(comfyInputRoot(), { recursive: true });
-  const extension = path.extname(inputPath).toLowerCase();
-  const name = `${jobId}_${safeName(path.basename(inputPath, extension))}${extension}`;
+  const name = `rivermoon_ai_${jobId}.png`;
   await fsp.copyFile(inputPath, path.join(comfyInputRoot(), name));
   return name;
 }
@@ -389,7 +406,12 @@ async function waitForPromptWebsocket(
       } else if (payload.type === "progress_state" && data.nodes) {
         const nextProgress = progressFromState(data.nodes, promptId);
         if (nextProgress != null) onProgress?.(nextProgress);
-      } else if (payload.type === "progress" && typeof data.value === "number" && typeof data.max === "number" && data.max > 0) {
+      } else if (
+        payload.type === "progress" &&
+        typeof data.value === "number" &&
+        typeof data.max === "number" &&
+        data.max > 0
+      ) {
         const nodeBase = progressBaseForNode(currentNode);
         const nodeSpan = progressSpanForNode(currentNode);
         onProgress?.(Math.min(90, nodeBase + Math.round((data.value / data.max) * nodeSpan)));
@@ -457,7 +479,7 @@ function resolveComfyOutputPath(image: { filename: string; subfolder?: string; t
   return path.join(root, image.subfolder ?? "", image.filename);
 }
 
-async function copyOrConvertOutput(sourcePath: string, outputPath: string, format: ImageFormat): Promise<void> {
+async function copyOrConvertOutput(sourcePath: string, outputPath: string, format: ConcreteImageFormat): Promise<void> {
   if (!fs.existsSync(sourcePath)) throw new Error(`ComfyUI 输出文件不存在：${sourcePath}`);
   const wantedExt = outputExtension(format).toLowerCase();
   if (path.extname(sourcePath).slice(1).toLowerCase() === wantedExt) {
@@ -479,12 +501,10 @@ async function copyOrConvertOutput(sourcePath: string, outputPath: string, forma
 
 function assertQualityResources(): void {
   if (!findComfyModel(DEFAULT_MODEL)) {
-    throw new Error(`缺少 ComfyUI 超分模型 ${DEFAULT_MODEL}。请确认 comfyui-runtime/models/upscale_models 下存在该 .pth 文件。`);
+    throw new Error(
+      `缺少 ComfyUI 超分模型 ${DEFAULT_MODEL}。请确认 comfyui-runtime/models/upscale_models 下存在该 .pth 文件。`
+    );
   }
-}
-
-function safeName(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.-]+/g, "_").slice(0, 80) || "image";
 }
 
 function delay(ms: number): Promise<void> {

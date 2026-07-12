@@ -39,7 +39,14 @@ describe("normalizeJob", () => {
     expect("tileSize" in job).toBe(false);
     expect(job.outputBytes).toBe(0);
 
-    const job2 = normalizeJob({ id: "a", inputPath: "x", fileName: "x.png", status: "succeeded", createdAt: 1, outputBytes: 1234 })!;
+    const job2 = normalizeJob({
+      id: "a",
+      inputPath: "x",
+      fileName: "x.png",
+      status: "succeeded",
+      createdAt: 1,
+      outputBytes: 1234
+    })!;
     expect(job2.outputBytes).toBe(1234);
 
     const job3 = normalizeJob({ id: "a", inputPath: "x", fileName: "x.png", status: "succeeded", createdAt: 1 })!;
@@ -58,7 +65,12 @@ describe("normalizeJob", () => {
     });
     expect(job?.status).toBe("succeeded");
     expect(job?.durationMs).toBe(20);
-    expect(job?.settings).toEqual({ outputFormat: "png", outputDirectory: null, maxSide: 4096 });
+    expect(job?.settings).toEqual({
+      processingMode: "aiUpscale",
+      outputFormat: "png",
+      outputDirectory: null,
+      maxSide: 4096
+    });
   });
 });
 

@@ -2,13 +2,24 @@ import { BrowserWindow } from "electron";
 import crypto from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { computeTargetDimensions, ensureDirectory, readImageDimensions } from "./image.js";
+import {
+  computeTargetDimensions,
+  computeWorkerOutputDimensions,
+  computeWebClearDimensions,
+  ensureDirectory,
+  outputExtension,
+  readImageDimensions,
+  readImageHasAlpha,
+  readWorkerImageDimensions,
+  resolveConcreteFormat
+} from "./image.js";
 import { buildOutputPath } from "./output-path.js";
 import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
+import { runWebClearEngine } from "./web-clear-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
 import { saveJobs, saveJobsSync } from "./jobs-store.js";
-import type { StartJobsPayload, UpscaleJob, UpscaleSettings } from "./types.js";
+import type { ConcreteImageFormat, StartJobsPayload, UpscaleJob, UpscaleSettings } from "./types.js";
 
 export class JobQueue {
   private jobs = new Map<string, UpscaleJob>();
@@ -110,38 +121,76 @@ export class JobQueue {
       job.progress = 5;
       job.message = "正在读取图片";
       this.emitNow();
-      log(`任务开始 ${job.fileName} format=${job.settings.outputFormat} maxSide=${job.settings.maxSide}`);
+      log(
+        `任务开始 ${job.fileName} mode=${job.settings.processingMode} format=${job.settings.outputFormat} maxSide=${job.settings.maxSide}`
+      );
 
-      const dimensions = await readImageDimensions(job.inputPath);
+      const dimensions =
+        job.settings.processingMode === "aiUpscale"
+          ? ((await readWorkerImageDimensions(job.inputPath)) ?? (await readImageDimensions(job.inputPath)))
+          : await readImageDimensions(job.inputPath);
+      const hasAlpha = await readImageHasAlpha(job.inputPath);
+      const outputFormat = resolveJobOutputFormat(job.settings, hasAlpha);
       job.dimensions = dimensions;
-      job.targetDimensions = computeTargetDimensions(dimensions, job.settings.maxSide, DEFAULT_SCALE);
+      job.targetDimensions = await computeJobTargetDimensions(job.inputPath, dimensions, job.settings);
       job.progress = 15;
       this.emit();
 
       const outputDirectory = job.settings.outputDirectory || path.join(path.dirname(job.inputPath), "upscaled");
       await ensureDirectory(outputDirectory);
-      const outputPath = buildOutputPath(job.inputPath, outputDirectory, job.settings.outputFormat);
+      const outputPath = buildOutputPath(job.inputPath, outputDirectory, outputFormat);
       job.outputPath = outputPath;
 
-      job.message = "正在用 AI 引擎处理";
+      job.message = processingMessage(job.settings.processingMode);
       job.progress = 18;
       this.emit();
-      await runComfyEngine({
-        inputPath: job.inputPath,
-        outputPath,
-        settings: job.settings,
-        inputDimensions: dimensions,
-        targetDimensions: job.targetDimensions,
-        format: job.settings.outputFormat,
-        signal: controller.signal,
-        onProgress: (percent) => {
-          const nextProgress = Math.max(job.progress, Math.min(99, Math.round(percent)));
-          if (nextProgress !== job.progress) {
-            job.progress = nextProgress;
-            this.emit();
-          }
+      if (job.settings.processingMode === "webClear") {
+        await runWebClearEngine({
+          inputPath: job.inputPath,
+          outputPath,
+          targetDimensions: job.targetDimensions,
+          format: outputFormat,
+          signal: controller.signal
+        });
+      } else if (job.settings.processingMode === "aiUpscaleWebClear") {
+        const intermediatePath = `${outputPath}.ai-tmp.${outputExtension(outputFormat)}`;
+        try {
+          await runComfyEngine({
+            inputPath: job.inputPath,
+            outputPath: intermediatePath,
+            settings: job.settings,
+            inputDimensions: dimensions,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal,
+            onProgress: (percent) => this.updateJobProgress(job, 18 + percent * 0.64)
+          });
+          job.message = "正在套用网页增强";
+          this.updateJobProgress(job, 86);
+          await runWebClearEngine({
+            inputPath: intermediatePath,
+            outputPath,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal
+          });
+        } finally {
+          await fsp.rm(intermediatePath, { force: true }).catch(() => {
+            // 清理失败不影响任务终态。
+          });
         }
-      });
+      } else {
+        await runComfyEngine({
+          inputPath: job.inputPath,
+          outputPath,
+          settings: job.settings,
+          inputDimensions: dimensions,
+          targetDimensions: job.targetDimensions,
+          format: outputFormat,
+          signal: controller.signal,
+          onProgress: (percent) => this.updateJobProgress(job, percent)
+        });
+      }
 
       job.message = "正在保存输出";
       job.progress = Math.max(job.progress, 92);
@@ -172,6 +221,14 @@ export class JobQueue {
     } finally {
       this.abortControllers.delete(job.id);
       this.flushSync();
+    }
+  }
+
+  private updateJobProgress(job: UpscaleJob, percent: number): void {
+    const nextProgress = Math.max(job.progress, Math.min(99, Math.round(percent)));
+    if (nextProgress !== job.progress) {
+      job.progress = nextProgress;
+      this.emit();
     }
   }
 
@@ -258,6 +315,28 @@ function createJob(inputPath: string, settings: UpscaleSettings): UpscaleJob {
 function elapsedDuration(job: UpscaleJob): number {
   if (!job.startedAt || !job.finishedAt) return 0;
   return Math.max(0, job.finishedAt - job.startedAt);
+}
+
+function processingMessage(mode: UpscaleSettings["processingMode"]): string {
+  if (mode === "webClear") return "正在套用网页同款增强";
+  if (mode === "aiUpscaleWebClear") return "正在用 AI 引擎放大";
+  return "正在用 AI 引擎处理";
+}
+
+function resolveJobOutputFormat(settings: UpscaleSettings, hasAlpha: boolean): ConcreteImageFormat {
+  if (settings.processingMode === "aiUpscale") return "png";
+  return resolveConcreteFormat(settings.outputFormat, hasAlpha);
+}
+
+async function computeJobTargetDimensions(
+  inputPath: string,
+  dimensions: NonNullable<UpscaleJob["dimensions"]>,
+  settings: UpscaleSettings
+): Promise<NonNullable<UpscaleJob["targetDimensions"]>> {
+  if (settings.processingMode === "aiUpscale")
+    return computeWorkerOutputDimensions(inputPath, settings.maxSide || 4096);
+  if (settings.processingMode === "webClear") return computeWebClearDimensions(dimensions, settings.maxSide);
+  return computeTargetDimensions(dimensions, settings.maxSide, DEFAULT_SCALE);
 }
 
 function formatJobError(error: unknown): string {

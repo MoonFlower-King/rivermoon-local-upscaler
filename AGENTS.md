@@ -2,13 +2,15 @@
 
 ## 项目一句话
 
-`RiverMoon 本地超分` 是一个 Windows 本地图片超分桌面工具。当前最新版只保留网站同款 AI 链路：
+`RiverMoon AI 创作台` 是连接 `rivermoon7.com` 的 Windows 桌面创作应用，当前包含：
 
-```text
-ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth
-```
+- AI 生图
+- AI 视频
+- GPT 对话与图片分析
+- 本地图片超分
+- 资产库、账户、诊断和 GitHub 更新
 
-应用不连接 RiverMoon 服务器，不使用 NewAPI Key，图片不上传云端。
+本地超分使用用户自己的 NVIDIA/CUDA 显卡，图片不上传。AI 生图、AI 视频和 GPT 对话是云端能力，必须通过主进程连接 RiverMoon 中转站并使用用户自己的 API Key。
 
 ## 工作目录
 
@@ -16,36 +18,27 @@ ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth
 D:\rivermoon-local-upscaler
 ```
 
-请只在这个目录继续处理。历史的旧 Web 项目目录只作为网站链路参考，不参与当前桌面版开发。
+请只在这个目录继续处理。旧 Web 项目可用于核对网站合同和链路，但不参与桌面版构建。
 
 ## 当前交付产物
 
 ```text
-D:\rivermoon-local-upscaler\release\win-unpacked\RiverMoon 本地超分.exe
+D:\rivermoon-local-upscaler\release\win-unpacked\RiverMoon AI 创作台.exe
 ```
 
-交付时复制整个目录：
-
-```text
-D:\rivermoon-local-upscaler\release\win-unpacked\
-```
-
-不能只复制 exe。
+交付时复制整个 `release\win-unpacked\` 目录，不能只复制 exe。
 
 ## 当前产品决策
 
-- 只保留 `网站同款 AI`。
-- 移除/隐藏 Pro、SUPIR、轻量 Vulkan/NCNN 入口。
-- 打开软件直接进入工作区。
-- 资源与 CUDA 检查只作为右侧小卡片，不占首屏主流程。
-- 任务记录必须持久化，最新任务在最前。
-- 每个任务必须显示计时：运行中显示“已用”，结束后显示“耗时”，并保存到任务记录。
-- 进度必须来自 ComfyUI 真实事件或 history 状态，不按时间伪造。
-- 对比弹窗支持缩放和拖动画面。
+- 不得删除或隐藏 AI 生图、AI 视频、GPT 对话等云端模块。
+- 新用户默认进入 AI 生图；已使用过的用户恢复上次所在模块。
+- 生图工作区保持“参数/参考素材”和“创作舞台”分离，为后续无限画布替换创作舞台预留边界。
+- RiverMoon Key 由主进程和 `safeStorage` 保管，渲染层不得接触明文 Key。
+- 生图和视频的模型、尺寸、能力与限制必须由实时合同驱动，不能在 UI 中伪造能力。
+- 本地超分固定使用网站同款 AI 工作流，不重新接回 Pro、SUPIR、Vulkan/NCNN 等旧入口。
+- 本地任务与云端任务记录都必须持久化，真实状态、真实计时、真实进度优先。
 
-## 网站同款链路
-
-当前桌面版工作流：
+## 本地超分链路
 
 ```text
 LoadImage
@@ -55,34 +48,42 @@ LoadImage
 -> SaveImage
 ```
 
-默认最大长边是 `4096`，贴近网页端历史输出。用户填 `0` 时按真实 4x 输出。
+默认最大长边 `4096`，贴近网页端历史输出；选择真实 4x 时不限制长边。模型权重不随安装包分发，由用户在应用内自行下载。
+
+## 云端链路
+
+```text
+Renderer
+-> preload IPC
+-> Electron main process
+-> RiverMoon image/video/agent gateway
+-> local asset/task persistence
+-> renderer event update
+```
+
+渲染层不直接请求网络。图片、视频和对话请求分别由主进程 adapter 处理，并使用图片合同、HTTPS 视频合同和 Responses 流式事件约束行为。
 
 ## 重要源码位置
 
 ```text
-src/main/main.ts             Electron 主进程、IPC、资源状态、诊断导出
-src/main/job-queue.ts        任务队列、任务持久化触发、网站同款任务执行
-src/main/jobs-store.ts       user-data/jobs.json 持久化，关闭重开保留任务
-src/main/comfy-engine.ts     内置 ComfyUI 启动、prompt 提交、真实进度监听、输出复制
-src/main/hardware-probe.ts   ComfyUI Runtime / CUDA 检测
-src/main/settings.ts         强制规整到网站同款 AI
-src/main/settings-store.ts   user-data/settings.json 持久化
-src/renderer/main.tsx        React UI
-src/renderer/styles.css      macOS 浅色工具风格
-resources/comfyui-runtime    内置 ComfyUI + Python/PyTorch/CUDA runtime
+src/main/main.ts                    Electron 主进程、IPC、账户、诊断与更新
+src/main/cloud/image-gen.ts         RiverMoon 生图网关
+src/main/cloud/image-protocol.ts    图片合同、参数与参考图校验
+src/main/cloud/image-queue.ts       生图任务与持久化
+src/main/cloud/video-gen.ts         RiverMoon 视频网关
+src/main/cloud/video-protocol.ts    视频合同、参数与参考图校验
+src/main/cloud/video-queue.ts       视频任务与持久化
+src/main/cloud/agent-gen.ts         GPT/Responses 流式网关
+src/main/cloud/agent-protocol.ts    对话请求与事件协议
+src/main/comfy-engine.ts            本地 ComfyUI 启动与真实进度
+src/main/job-queue.ts               本地超分任务队列
+src/main/model-downloader.ts        4x-UltraSharp 按需下载与校验
+src/renderer/main.tsx               React UI 与全部工作区
+src/renderer/styles.css             响应式浅色/深色界面
+resources/comfyui-runtime           内置 ComfyUI + Python/PyTorch/CUDA runtime
 ```
 
-`src/main/upscaler-engine.ts`、`src/main/engine-errors.ts`、`resources/engines`、`resources/models` 属于旧轻量链路遗留，不是当前产品入口。不要重新接回，除非用户明确改变产品决策。
-
-## 当前实现要点
-
-- `sanitizeSettings()` 强制 `engineMode="comfyui"`、`qualityMode="standard"`、`model="4x-UltraSharp.pth"`。
-- `JobQueue.getJobs()` 按 `createdAt` 倒序返回，最新任务在最前。
-- `jobs-store.ts` 最多保存 300 条任务；上次关闭时仍在 running/queued 的任务会标成 `已取消 / 上次关闭软件时已停止`。
-- `durationMs` 是每个任务的总耗时；旧任务没有该字段时会用 `startedAt/finishedAt` 自动补算。
-- ComfyUI 进度优先监听 websocket `progress_state`，兼容老 `progress`，同时用 `/history/{prompt_id}` 判断完成，避免漏事件。
-- websocket 不可用时回退轮询 history；轮询只判断完成，不按时间伪造百分比。
-- `package.json` 打包过滤掉 DiffBIR/SUPIR 资源和其他 upscale 模型，只保留 `4x-UltraSharp.pth`。
+旧轻量超分文件仍是遗留代码，不是当前产品入口，不要重新接回。
 
 ## 验证命令
 
@@ -90,25 +91,24 @@ resources/comfyui-runtime    内置 ComfyUI + Python/PyTorch/CUDA runtime
 
 ```bash
 npm run build
+npm run lint
+npm test
 ```
 
-生成交付目录：
+生成交付目录并验证：
 
 ```bash
 npm run dist:dir
+npm run release:smoke
+npm run release:launch-smoke
 ```
 
-发版前启动：
-
-```text
-release\win-unpacked\RiverMoon 本地超分.exe
-```
-
-确认窗口能打开、工作区在首屏、右侧检测卡可用、拖入图片能输出、关闭重开任务记录仍在。
+人工回归至少覆盖 AI 生图、AI 视频、GPT 对话、资产库、设置、本地超分，以及关闭重开后的任务记录。
 
 ## 已知限制
 
-- 需要 NVIDIA/CUDA；当前没有 CPU、DirectML、AMD/Intel fallback。
-- `4x-UltraSharp.pth` 有非商业授权风险，商业发版前必须解决授权或替换模型。
-- 完整 ComfyUI/PyTorch/CUDA 目录体积较大。
-- 安装包未代码签名时 Windows 可能提示未知发布者。
+- 本地超分需要 NVIDIA/CUDA；当前没有 CPU、DirectML、AMD/Intel fallback。
+- `4x-UltraSharp.pth` 为非商业授权，商业发版前必须完成授权确认或替换模型。
+- 完整 ComfyUI/PyTorch/CUDA runtime 体积较大。
+- 未代码签名的 Windows 安装包会提示未知发布者。
+- 真实付费生图/视频和 GPT E2E 需要有效 RiverMoon Key，自动化测试不能代替人工付费链路验收。

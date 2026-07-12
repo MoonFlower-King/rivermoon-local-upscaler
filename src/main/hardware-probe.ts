@@ -112,7 +112,9 @@ async function probeComfyCuda(): Promise<{ ok: boolean; devices: string[]; issue
       ok: false,
       devices: [],
       issue: "未找到 ComfyUI 使用的 Python。",
-      hints: ["请确认 resources/comfyui-runtime 内包含 python_embeded/python.exe、python/python.exe 或 venv/Scripts/python.exe。"]
+      hints: [
+        "请确认 resources/comfyui-runtime 内包含 python_embeded/python.exe、python/python.exe 或 venv/Scripts/python.exe。"
+      ]
     };
   }
 
@@ -218,9 +220,7 @@ function parseGpuJson(raw: string): GpuInfo[] {
         const name = typeof entry?.Name === "string" ? entry.Name.trim() : "";
         if (!name) return null;
         const driverVersion =
-          typeof entry?.DriverVersion === "string" && entry.DriverVersion.trim()
-            ? entry.DriverVersion.trim()
-            : null;
+          typeof entry?.DriverVersion === "string" && entry.DriverVersion.trim() ? entry.DriverVersion.trim() : null;
         return { name, driverVersion };
       })
       .filter((gpu): gpu is GpuInfo => gpu !== null);

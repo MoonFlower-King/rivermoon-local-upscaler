@@ -1,10 +1,12 @@
-# RiverMoon AI 工作台 · v2 设计定稿
+# RiverMoon AI 创作台 · v2 设计定稿
+
+> 历史设计记录：本文描述 2026-07-05 时的阶段性范围。AI 视频和 GPT 现已实现；当前产品定义以根目录 `AGENTS.md`、`PRODUCT_DOCUMENT.md` 和 `PRODUCT_REPORT_BILINGUAL.md` 为准。
 
 > 状态：已与产品负责人确认方向（2026-07-05）。视频模块延后至 v2 后期；生图已用真实 Key 联调打通。
 
 ## 1. 定位与商业逻辑
 
-桌面 app 从「本地超分工具」升级为「RiverMoon 中转站客户的 AI 工作台」：
+桌面 app 从「本地超分工具」升级为「RiverMoon 中转站客户的 AI 创作台」：
 
 ```text
 免费用户下载 app → 本地超分（无 Key、离线、无限量）

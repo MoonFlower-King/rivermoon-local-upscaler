@@ -3,6 +3,8 @@
  * 不依赖 electron / 网络，vitest 可直测。
  */
 
+import { redactDiagnosticsText } from "../diagnostics-redaction.js";
+
 export type RelayErrorKind = "auth" | "quota" | "rate" | "server" | "network" | "bad-response";
 
 export class RelayError extends Error {
@@ -36,17 +38,42 @@ export function classifyRelayError(status: number, bodyText: string): RelayError
 /** 尽力从 OpenAI 风格错误体里挖出 message；失败返回 null。 */
 export function extractApiErrorMessage(bodyText: string): string | null {
   try {
-    const parsed = JSON.parse(bodyText) as { error?: { message?: unknown } | string; message?: unknown };
-    if (typeof parsed.error === "string") return parsed.error.slice(0, 200);
+    const parsed = JSON.parse(bodyText) as {
+      detail?: { error?: unknown; message?: unknown } | string;
+      error?: { message?: unknown } | string;
+      message?: unknown;
+    };
+    if (typeof parsed.error === "string") return sanitizeApiErrorDetail(parsed.error);
     if (parsed.error && typeof parsed.error === "object" && typeof parsed.error.message === "string") {
-      return parsed.error.message.slice(0, 200);
+      return sanitizeApiErrorDetail(parsed.error.message);
     }
-    if (typeof parsed.message === "string") return parsed.message.slice(0, 200);
+    if (typeof parsed.detail === "string") return sanitizeApiErrorDetail(parsed.detail);
+    if (parsed.detail && typeof parsed.detail === "object") {
+      if (typeof parsed.detail.message === "string") return sanitizeApiErrorDetail(parsed.detail.message);
+      if (typeof parsed.detail.error === "string") return sanitizeApiErrorDetail(parsed.detail.error);
+    }
+    if (typeof parsed.message === "string") return sanitizeApiErrorDetail(parsed.message);
   } catch {
     // 非 JSON 响应。
   }
   const trimmed = bodyText.trim();
-  return trimmed ? trimmed.slice(0, 200) : null;
+  return trimmed ? sanitizeApiErrorDetail(trimmed) : null;
+}
+
+function sanitizeApiErrorDetail(detail: string): string | null {
+  if (looksLikeHtmlError(detail)) return "上游返回 HTML 错误页";
+
+  const redacted = redactDiagnosticsText(detail)
+    .replace(/\b(prompt|提示词)\b\s*[:：=]\s*[^。；;\r\n]{8,}/gi, "$1: [prompt]")
+    .replace(/\b(bad prompt|invalid prompt|prompt rejected)\b\s+[^。；;\r\n]{8,}/gi, "$1 [prompt]")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return redacted ? redacted.slice(0, 200) : null;
+}
+
+function looksLikeHtmlError(detail: string): boolean {
+  return /<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]|<\/html>|<\/body>/i.test(detail);
 }
 
 /** /v1/models 响应 → 模型 id 列表（排序去重）。 */
@@ -74,6 +101,10 @@ export function parseUsageUsd(payload: unknown): number | null {
 /** 瞬时错误（上游 503/限流/网络抖动）值得自动重试；配额/鉴权/参数类立即上抛。 */
 export function isTransientRelayError(error: unknown): boolean {
   return error instanceof RelayError && (error.kind === "server" || error.kind === "rate" || error.kind === "network");
+}
+
+export function shouldRetryTransientRelayError(error: unknown, attempt: number, maxAttempts: number): boolean {
+  return Number.isInteger(attempt) && attempt >= 0 && attempt < maxAttempts && isTransientRelayError(error);
 }
 
 /** 掩码展示 Key：只留前缀与末 4 位，渲染层只能见到这个。 */

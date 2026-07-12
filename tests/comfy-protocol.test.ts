@@ -3,6 +3,8 @@ import {
   ComfyExecutionError,
   NODE,
   assertHistoryHealthy,
+  buildStandardPromptTemplate,
+  describeStandardWorkflow,
   extractExecutionMessage,
   progressFromState
 } from "../src/main/comfy-protocol";
@@ -71,5 +73,22 @@ describe("progressFromState", () => {
   it("空或无有效节点返回 null", () => {
     expect(progressFromState({}, "p1")).toBeNull();
     expect(progressFromState(undefined, "p1")).toBeNull();
+  });
+});
+
+describe("describeStandardWorkflow", () => {
+  it("输出网站同款 AI 的稳定节点链路摘要", () => {
+    expect(describeStandardWorkflow()).toBe(
+      "LoadImage -> UpscaleModelLoader(4x-UltraSharp.pth) -> ImageUpscaleWithModel -> ImageScale(Lanczos target width/height) -> SaveImage"
+    );
+  });
+
+  it("输出不含本地路径的标准 ComfyUI prompt 模板", () => {
+    expect(buildStandardPromptTemplate("4x-UltraSharp.pth")).toMatchObject({
+      [NODE.LOAD]: { inputs: { image: "<comfy_input_file>" } },
+      [NODE.MODEL]: { inputs: { model_name: "4x-UltraSharp.pth" } },
+      [NODE.SCALE]: { inputs: { width: "<target_width>", height: "<target_height>", upscale_method: "lanczos" } },
+      [NODE.SAVE]: { inputs: { filename_prefix: "<output_prefix>" } }
+    });
   });
 });

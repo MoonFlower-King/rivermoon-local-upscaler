@@ -14,6 +14,9 @@ export function comfyRuntimeRoot(): string {
   const configured = process.env.RIVERMOON_COMFYUI_ROOT || process.env.COMFYUI_ROOT;
   if (configured && fs.existsSync(configured)) return configured;
 
+  const workerRoot = "D:/ComfyUI";
+  if (fs.existsSync(path.join(workerRoot, "main.py"))) return workerRoot;
+
   return path.join(appRoot(), "comfyui-runtime");
 }
 

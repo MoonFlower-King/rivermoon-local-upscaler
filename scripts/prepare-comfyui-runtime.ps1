@@ -1,5 +1,5 @@
 param(
-  [string]$SourceComfyUI = "D:\ComfyUI",
+  [string]$SourceComfyUI = "",
   [string]$Destination = "resources\comfyui-runtime",
   [switch]$BuildPortablePython,
   # 留空则自动探测 Python 3.12（py -3.12 / PATH 中的 python）；也可显式传入其安装目录。
@@ -8,6 +8,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $SourceComfyUI) {
+  throw "SourceComfyUI is required. Example: -SourceComfyUI 'D:\ComfyUI'"
+}
 
 function Resolve-FullPath([string]$PathValue) {
   if ([System.IO.Path]::IsPathRooted($PathValue)) {
@@ -89,20 +93,10 @@ Get-ChildItem -LiteralPath $source -Filter "*.py" -File | ForEach-Object {
 
 $modelsOut = Join-Path $destinationRoot "models\upscale_models"
 New-Item -ItemType Directory -Force -Path $modelsOut | Out-Null
-$requiredModels = @(
-  "4x-UltraSharp.pth",
-  "RealESRGAN_x4plus.pth",
-  "RealESRGAN_x4plus_anime_6B.pth",
-  "4x_NMKD-Siax_200k.pth",
-  "4x_foolhardy_Remacri.pth"
-)
-foreach ($model in $requiredModels) {
-  $from = Join-Path $source "models\upscale_models\$model"
-  if (Test-Path $from) {
-    Write-Host "Copy model $model"
-    Copy-Item -LiteralPath $from -Destination (Join-Path $modelsOut $model) -Force
-  }
-}
+@"
+Model weights are intentionally not copied into the repository runtime.
+Use the application's explicit model download flow.
+"@ | Set-Content -Encoding UTF8 (Join-Path $modelsOut "README.txt")
 
 New-Item -ItemType Directory -Force -Path (Join-Path $destinationRoot "input") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $destinationRoot "output") | Out-Null

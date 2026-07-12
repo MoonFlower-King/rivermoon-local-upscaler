@@ -1,7 +1,7 @@
 import fsSync from "node:fs";
 import path from "node:path";
 import { outputExtension } from "./image.js";
-import type { ImageFormat } from "./types.js";
+import type { ConcreteImageFormat } from "./types.js";
 
 /**
  * 生成任务输出路径；目标已存在时追加 _2/_3… 序号。
@@ -11,11 +11,15 @@ import type { ImageFormat } from "./types.js";
 export function buildOutputPath(
   inputPath: string,
   outputDirectory: string,
-  format: ImageFormat,
+  format: ConcreteImageFormat,
   exists: (candidate: string) => boolean = fsSync.existsSync
 ): string {
   const parsed = path.parse(inputPath);
-  return resolveCollisionFreePath(path.join(outputDirectory, `${parsed.name}_upscaled`), outputExtension(format), exists);
+  return resolveCollisionFreePath(
+    path.join(outputDirectory, `${parsed.name}_upscaled`),
+    outputExtension(format),
+    exists
+  );
 }
 
 export function resolveCollisionFreePath(

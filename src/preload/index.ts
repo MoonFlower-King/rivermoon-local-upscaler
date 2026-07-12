@@ -1,7 +1,19 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { ImageGenParams, ImageGenTask, ModelDownloadState, UpscaleJob, UpscalerApi } from "../main/types.js";
+import type {
+  AgentChatEvent,
+  AgentChatRequest,
+  ImageGenParams,
+  ImageGenTask,
+  ModelDownloadState,
+  RendererReadyPayload,
+  UpscaleJob,
+  UpscalerApi,
+  VideoGenParams,
+  VideoGenTask
+} from "../main/types.js";
 
 const api = {
+  reportRendererReady: (payload: RendererReadyPayload) => ipcRenderer.send("app:renderer-ready", payload),
   // Electron 32+ 移除了 File.path，拖拽文件改用 webUtils.getPathForFile 取真实路径。
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   getAssetStatus: () => ipcRenderer.invoke("assets:status"),
@@ -9,9 +21,14 @@ const api = {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings: unknown) => ipcRenderer.invoke("settings:save", settings),
   getAppInfo: () => ipcRenderer.invoke("app:get-info"),
+  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  openUpdatePage: (url: string) => ipcRenderer.invoke("updates:open-release", url),
   exportLogs: () => ipcRenderer.invoke("logs:export"),
   revealLogs: () => ipcRenderer.invoke("logs:reveal"),
+  copyText: (text: string) => ipcRenderer.invoke("clipboard:write-text", text),
   selectFiles: () => ipcRenderer.invoke("dialog:select-files"),
+  selectImageReferences: () => ipcRenderer.invoke("dialog:select-image-references"),
+  selectVideoSources: () => ipcRenderer.invoke("dialog:select-video-sources"),
   selectFolder: () => ipcRenderer.invoke("dialog:select-folder"),
   selectOutputDirectory: () => ipcRenderer.invoke("dialog:select-output-directory"),
   discoverFiles: (paths: string[]) => ipcRenderer.invoke("files:discover", paths),
@@ -31,6 +48,7 @@ const api = {
     ipcRenderer.on("jobs:updated", listener);
     return () => ipcRenderer.removeListener("jobs:updated", listener);
   },
+  getImageContract: () => ipcRenderer.invoke("image:contract"),
   startImageTask: (params: ImageGenParams) => ipcRenderer.invoke("image-gen:start", params),
   listImageTasks: () => ipcRenderer.invoke("image-gen:list"),
   cancelImageTask: (id: string) => ipcRenderer.invoke("image-gen:cancel", id),
@@ -40,6 +58,28 @@ const api = {
     ipcRenderer.on("image-tasks:updated", listener);
     return () => ipcRenderer.removeListener("image-tasks:updated", listener);
   },
+  getVideoContract: () => ipcRenderer.invoke("video:contract"),
+  getVideoGatewayDiagnostics: () => ipcRenderer.invoke("video:diagnostics"),
+  startVideoTask: (params: VideoGenParams) => ipcRenderer.invoke("video-gen:start", params),
+  listVideoTasks: () => ipcRenderer.invoke("video-gen:list"),
+  syncRecentVideoTasks: () => ipcRenderer.invoke("video-gen:sync-recent"),
+  cancelVideoTask: (id: string) => ipcRenderer.invoke("video-gen:cancel", id),
+  resumeVideoTask: (id: string) => ipcRenderer.invoke("video-gen:resume", id),
+  retryVideoTask: (id: string) => ipcRenderer.invoke("video-gen:retry", id),
+  clearFinishedVideoTasks: () => ipcRenderer.invoke("video-gen:clear-finished"),
+  onVideoTasksUpdated: (callback: (tasks: VideoGenTask[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, tasks: unknown[]) => callback(tasks as VideoGenTask[]);
+    ipcRenderer.on("video-tasks:updated", listener);
+    return () => ipcRenderer.removeListener("video-tasks:updated", listener);
+  },
+  startAgentResponse: (request: AgentChatRequest) => ipcRenderer.invoke("agent-chat:start", request),
+  cancelAgentResponse: (requestId: string) => ipcRenderer.invoke("agent-chat:cancel", requestId),
+  onAgentResponseEvent: (callback: (event: AgentChatEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: unknown) => callback(event as AgentChatEvent);
+    ipcRenderer.on("agent-chat:event", listener);
+    return () => ipcRenderer.removeListener("agent-chat:event", listener);
+  },
+  getMediaUrl: (filePath: string) => ipcRenderer.invoke("media:local-url", filePath),
   getModelStatus: () => ipcRenderer.invoke("model:get-status"),
   downloadModel: () => ipcRenderer.invoke("model:download"),
   cancelModelDownload: () => ipcRenderer.invoke("model:cancel-download"),
@@ -51,4 +91,3 @@ const api = {
 } satisfies UpscalerApi;
 
 contextBridge.exposeInMainWorld("upscaler", api);
-

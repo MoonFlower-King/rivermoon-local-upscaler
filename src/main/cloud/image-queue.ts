@@ -12,6 +12,7 @@ import type { ImageGenParams, ImageGenTask } from "../types.js";
 
 /** 云端并行度：生图是网络 IO，2 路并行在体验与限流之间取平衡。 */
 const CONCURRENCY = 2;
+const REDACTED_IMAGE_REFERENCE_PATH = "[已上传参考图]";
 
 function tasksPath(): string {
   return path.join(app.getPath("userData"), "image-tasks.json");
@@ -180,11 +181,7 @@ export class ImageTaskQueue {
 
   private stableForDisk(): ImageGenTask[] {
     return this.getTasks()
-      .map((task) =>
-        task.status === "running" || task.status === "queued"
-          ? { ...task, status: "cancelled" as const, message: "上次关闭软件时已停止", finishedAt: task.finishedAt ?? Date.now() }
-          : task
-      )
+      .map((task) => stableImageTaskForDisk(task))
       .slice(0, MAX_SAVED_IMAGE_TASKS);
   }
 
@@ -211,4 +208,26 @@ export class ImageTaskQueue {
       log(`生图任务同步保存失败 ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+}
+
+export function stableImageTaskForDisk(task: ImageGenTask, now = Date.now()): ImageGenTask {
+  const stableTask =
+    task.status === "running" || task.status === "queued"
+      ? { ...task, status: "cancelled" as const, message: "上次关闭软件时已停止", finishedAt: task.finishedAt ?? now }
+      : task;
+
+  if (
+    stableTask.params.referencePaths.length === 0 ||
+    (stableTask.status === "failed" && stableTask.outputPaths.length === 0)
+  ) {
+    return stableTask;
+  }
+
+  return {
+    ...stableTask,
+    params: {
+      ...stableTask.params,
+      referencePaths: stableTask.params.referencePaths.map(() => REDACTED_IMAGE_REFERENCE_PATH)
+    }
+  };
 }

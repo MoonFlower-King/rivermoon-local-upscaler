@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { app } from "electron";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -58,7 +59,10 @@ export async function startModelDownload(): Promise<void> {
   try {
     targetDir = await resolveTargetDir();
   } catch (error) {
-    setState({ phase: "failed", message: `无法创建模型目录：${error instanceof Error ? error.message : String(error)}` });
+    setState({
+      phase: "failed",
+      message: `无法创建模型目录：${error instanceof Error ? error.message : String(error)}`
+    });
     return;
   }
 
@@ -134,8 +138,12 @@ export async function downloadModelFile(
   }
 }
 
-/** 优先 runtime 模型目录；写探针失败回退 userData 并生成 extra_model_paths.yaml。 */
+/** 打包版优先 userData；开发版优先 runtime。避免 release/win-unpacked 重建时删掉已下载模型。 */
 async function resolveTargetDir(): Promise<string> {
+  if (app.isPackaged) {
+    return prepareUserModelDir();
+  }
+
   const primary = comfyUpscaleModelsRoot();
   try {
     await fsp.mkdir(primary, { recursive: true });
@@ -144,19 +152,24 @@ async function resolveTargetDir(): Promise<string> {
     await fsp.rm(probe, { force: true });
     return primary;
   } catch {
-    const fallback = userModelsRoot();
-    await fsp.mkdir(fallback, { recursive: true });
-    // ComfyUI 通过 --extra-model-paths-config 认到 userData 下的模型目录（comfy-engine 启动时携带）。
-    const yaml = [
-      "rivermoon:",
-      `  base_path: ${path.dirname(fallback).replace(/\\/g, "/")}`,
-      "  upscale_models: upscale_models",
-      ""
-    ].join("\n");
-    await fsp.writeFile(extraModelPathsConfig(), yaml, "utf8");
+    const fallback = await prepareUserModelDir();
     log(`runtime 模型目录不可写，回退 ${fallback}`);
     return fallback;
   }
+}
+
+async function prepareUserModelDir(): Promise<string> {
+  const fallback = userModelsRoot();
+  await fsp.mkdir(fallback, { recursive: true });
+  // ComfyUI 通过 --extra-model-paths-config 认到 userData 下的模型目录（comfy-engine 启动时携带）。
+  const yaml = [
+    "rivermoon:",
+    `  base_path: ${path.dirname(fallback).replace(/\\/g, "/")}`,
+    "  upscale_models: upscale_models",
+    ""
+  ].join("\n");
+  await fsp.writeFile(extraModelPathsConfig(), yaml, "utf8");
+  return fallback;
 }
 
 function setState(patch: Partial<ModelDownloadState>): void {

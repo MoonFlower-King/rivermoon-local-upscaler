@@ -16,10 +16,7 @@ describe("buildOutputPath", () => {
   });
 
   it("目标已存在时追加 _2/_3 序号，不覆盖旧输出", () => {
-    const existing = new Set([
-      path.join("C:", "out", "a_upscaled.png"),
-      path.join("C:", "out", "a_upscaled_2.png")
-    ]);
+    const existing = new Set([path.join("C:", "out", "a_upscaled.png"), path.join("C:", "out", "a_upscaled_2.png")]);
     expect(
       buildOutputPath(path.join("C:", "in", "a.jpg"), path.join("C:", "out"), "png", (candidate) =>
         existing.has(candidate)

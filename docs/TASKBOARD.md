@@ -17,6 +17,7 @@
 |---|---|
 | 中转站 | https://rivermoon7.com/ ，NewAPI 部署 |
 | 测试 Key 可用模型 | gpt-5.4 / gpt-5.4-mini / gpt-5.5 / gpt-image-2（生图模型列表必须由 `/v1/models` 动态驱动） |
+| GPT 对话端点 | `POST https://img.rivermoon7.com/v1/responses`，Responses SSE；默认模型 `gpt-5.5`，默认 `reasoning_effort=medium` |
 | 生图端点 | `POST /v1/images/generations`，返回 `data[0].b64_json`（须兼容 `url` 模式） |
 | 余额/用量 | `GET /v1/dashboard/billing/subscription`(.hard_limit_usd) + `/usage`(.total_usage，0.01USD 单位) |
 | 4x-UltraSharp.pth SHA256 | `A5812231FC936B42AF08A5EDBA784195495D303D5B3248C24489EF0C4021FE01`（67MB，下载校验用） |
@@ -61,10 +62,56 @@
 | 4.4 | 充值 URL 换正式地址（TOPUP_URL in cloud/account.ts） | ⛔ 待产品方提供 URL | 一行替换 + 重打包 |
 | 4.5 | 用户人工验收：实包「下载模型→超分」全流程、设置页填 Key、生图 UI 点击出图、深浅色切换 | ⛔ 待用户 | 见 CLAUDE.md 验证命令节 |
 
+### M5 AI 视频首版 🟦（2026-07-08，商业验收未闭环）
+| # | 任务 | 状态 | 验收标准 |
+|---|---|---|---|
+| 5.1 | 生产视频合同协议：解析 HTTPS contract、模型、endpoint、价格、参考图类型、`multi_reference` 别名 | ✅ | `npm run release:online-smoke` 通过；生产合同 `2026-07-06.pro666-video-models-v1` 可解析 |
+| 5.2 | AI 视频工作区 UI：文生/图生/多参考图/首尾帧模式、模型参数、参考图选择、禁用原因 | ✅ | 合同支持才允许提交；当前生产 `first_last_frame=0`，必须继续门控 |
+| 5.3 | 视频任务队列：持久化、远端 job 恢复、停止同步、recent 合并、下载失败恢复 | ✅ | mock E2E 覆盖恢复不重复提交、不重复扣费、远端取消/过期清理旧错误 |
+| 5.4 | 视频下载安全：认证请求只走 HTTPS 网关、外部 CDN 不带 Key、签名 URL 不进持久化诊断、错误响应不落盘 | ✅ | `tests/video-url.test.ts`、`tests/video-gen-e2e.test.ts` 覆盖 |
+| 5.5 | 非付费发布门禁：打包结构 smoke、启动 smoke、视频合同 smoke | ✅ | `npm run release:verify` 通过；release smoke 88 pass / 3 warning；launch smoke 通过 |
+| 5.6 | 真实付费 E2E 手动门禁脚本 | ✅ | `npm run video:paid-e2e:dry-run` 通过；`npm run video:paid-e2e` 必须设置真实 Key 和确认短语才会计费提交 |
+| 5.7 | 真实文生视频付费 E2E | ⛔ 待真实 Key/用户确认 | 成功提交、轮询、下载、可播放；保存远端 job_id、模型、模式、输出文件，不保存签名 URL query |
+| 5.8 | 真实图生视频和多参考图视频付费 E2E | ⛔ 待真实 Key/参考图/用户确认 | source-cache 上传、顺序和类型保持、远端任务成功、视频下载落盘 |
+| 5.9 | 打包版 GUI 视频人工回归 | ⛔ 待用户/人工 | 从 `release\win-unpacked\RiverMoon AI 创作台.exe` 点击完成合同同步、提交限制、任务记录、下载预览、资产库 |
+
+### M6 AI 生图站点对齐 🟦（2026-07-08，真实 Key GUI 验收未闭环）
+| # | 任务 | 状态 | 验收标准 |
+|---|---|---|---|
+| 6.1 | 读取线上图片能力合同 | ✅ | `https://img.rivermoon7.com/v1/image/contract` 可解析；当前版本 `2026-06-07.phase1`，4 个模型 |
+| 6.2 | 桌面端生图参数对齐站点 | ✅ | 支持合同模型标签、4K 尺寸、质量、输出格式、fit_mode、原生直出、自定义尺寸 |
+| 6.3 | 参考图编辑链路 | ✅ | 参考图为空走 `/v1/images/generations` JSON；有参考图走 `/v1/images/edits` FormData，支持 `@图1` 顺序绑定 |
+| 6.4 | 分镜模板入口 | ✅ | 六宫格、九宫格、故事板模板可填充提示词 |
+| 6.5 | 非计费请求级测试 | ✅ | `tests/image-gen-e2e.test.ts` 覆盖图片合同、文生图 JSON、参考图 edits FormData |
+| 6.6 | 真实 Key GUI 生图回归 | ⛔ 待用户/人工 | 打包版中用真实 Key 完成 4K PNG、参考图编辑、自定义尺寸、模板提示词流程 |
+
+### M7 GPT 对话站点接入 🟦（2026-07-08，真实 Key GUI 验收未闭环）
+| # | 任务 | 状态 | 验收标准 |
+|---|---|---|---|
+| 7.1 | 读取线上 agent 链路 | ✅ | `img.rivermoon7.com/agent` 前端确认使用 `/v1/responses`、`gpt-5.5`、`reasoning_effort`、图片 `input_image` |
+| 7.2 | 桌面端 GPT 对话 UI | ✅ | 侧栏新增 `GPT 对话`，支持历史对话、模型选择、推理强度、文本输入、图片粘贴/拖入/选择 |
+| 7.3 | 主进程 Responses SSE | ✅ | Key 只在主进程读取；`agent-chat:*` IPC 流式返回 delta，支持取消 |
+| 7.4 | 非计费请求级测试 | ✅ | `tests/agent-protocol.test.ts` 和 `tests/agent-gen-e2e.test.ts` 覆盖请求体、SSE、错误映射；`agent:responses-smoke` 验证生产 endpoint 要求认证 |
+| 7.5 | 真实 Key GUI GPT 回归 | ⛔ 待用户/人工 | 打包版中完成文本对话、图片分析、模型切换、推理强度、取消输出 |
+
+### M8 版本更新按钮 ✅（2026-07-08，手动下载更新）
+| # | 任务 | 状态 | 验收标准 |
+|---|---|---|---|
+| 8.1 | 主进程 GitHub 更新检查 | ✅ | 优先读取 `releases/latest`；404 时回退 `tags?per_page=1`；网络/私有仓库/无 Release 均返回中文结果，不让 UI 崩溃 |
+| 8.2 | 设置页版本更新卡片 | ✅ | 显示当前版本；按钮可检查更新；有新版本时可打开下载页；没有 Release 时提示发布到 GitHub Releases |
+| 8.3 | 安全打开下载页 | ✅ | `openExternal` 只允许当前 GitHub 仓库的 releases/tags 页面 |
+| 8.4 | 自动化和打包 smoke | ✅ | `tests/update-checker.test.ts` 覆盖版本比较/Release/Tag/错误；`release-smoke` 检查 IPC、preload、renderer、asar 文件 |
+
+### M9 GitHub 发布准备 ✅（2026-07-08，分卷上传）
+| # | 任务 | 状态 | 验收标准 |
+|---|---|---|---|
+| 9.1 | GitHub Release 预检脚本 | ✅ | `npm run release:github:preflight` 检查 gh 登录、工作区干净、tag 可用、交付目录存在、asset 小于 2GiB |
+| 9.2 | GitHub 分卷资产脚本 | ✅ | `npm run release:github:assets` 使用 7-Zip 生成 1900MB 分卷、SHA256、manifest、下载说明和 Release notes |
+| 9.3 | 发布文档更新 | ✅ | `docs/BUILD_AND_RELEASE.md` 记录 GitHub 发版步骤、7-Zip 要求、分卷下载说明、gh release create 示例 |
+
 ### v2 远期（不在本期）
-- AI 视频（国产 Kling/即梦 + Sora/Runway，异步 adapter）——等渠道 Key。
 - Midjourney（当前 Key 分组无渠道）。
-- 自动更新、代码签名。
+- 静默自动更新、代码签名。
 
 ## 发现的问题（自查追加，带日期）
 
@@ -87,6 +134,15 @@
   多用户中招、失败未计费。app 侧已加瞬时错误自动重试（2s/5s 退避，仅 server/rate/network）。
   **服务端待办（产品方）**：给 gpt-image-2 加备用渠道 + 失败重试次数设 2-3；单渠道期间慎开
   「失败自动禁用」；排查 codex 渠道上游并发配额。
+- 2026-07-08（M5 自查）：任务板曾仍把 AI 视频写成远期能力，已更正为首版已接入但商业验收未闭环。
+  当前不能宣布商业消费级完成；阻断项是真实付费文生/图生/多参考图 E2E、打包 GUI 人工回归、网站同图差分、
+  模型授权和代码签名。
+- 2026-07-08（M6 自查）：桌面端 AI 生图曾只暴露模型/三尺寸/张数，和线上生图工作台不一致。已改为读取
+  `img.rivermoon7.com/v1/image/contract`，并接入质量、格式、4K、自定义尺寸、原生直出、参考图编辑和分镜模板。
+  真实 Key GUI 回归仍待人工点击。
+- 2026-07-08（M7 自查）：GPT 对话已按线上 `/agent` 链路接入 `img.rivermoon7.com/v1/responses`，但尚未用真实 Key 在打包 GUI 中完成文本/图片对话计费验收。
+- 2026-07-08（M8 自查）：已新增手动版本更新按钮。当前功能只检查 GitHub Release/Tag 并打开下载页，不做运行中自动覆盖安装；后续正式商用仍需要代码签名和更完整的自动更新策略。
+- 2026-07-08（M9 自查）：交付目录约 6GB，无法作为单个 GitHub Release asset 上传；已新增 7-Zip 分卷资产脚本和发布预检脚本。当前机器未登录 gh，且未安装 7-Zip，真正发版前必须补齐。
 
 ## 变更日志
 
@@ -101,3 +157,16 @@
   真实下载 E2E 通过（hf-mirror 40.9s/67MB）。
 - 2026-07-06 M4 完成（除 4.4 充值 URL / 4.5 用户验收）：自查项清理、CLAUDE.md v2 重写、
   硬件检测引擎/模型分离（回归发现并修复）、实包验证（无超分 .pth、启动正常、文案正确）。
+- 2026-07-08 M5 首版接入：新增 AI 视频模块、生产视频合同解析、source-cache 上传、任务提交/轮询/下载、
+  远端任务恢复、视频安全下载策略、诊断脱敏、release smoke、launch smoke、online contract smoke、付费 E2E 手动门禁。
+  当前自动化 16 个测试文件 / 185 tests 通过；`release:verify` 通过。真实付费 E2E 与 GUI 人工回归仍待验收。
+- 2026-07-08 M6 生图站点对齐：新增图片合同解析、图片网关提交、参考图 edits FormData、自定义尺寸/质量/格式/原生直出 UI、
+  分镜模板、图片请求级非计费 E2E。当前自动化 17 个测试文件 / 192 tests 通过。
+- 2026-07-08 M7 GPT 对话接入：新增 agent protocol/gen、Responses SSE、GPT 对话 UI、本机历史、图片输入压缩、请求级非计费 E2E。
+  当前自动化 20 个测试文件 / 200 tests 通过。
+- 2026-07-08 M8 版本更新按钮：新增 update-checker、updates:* IPC、preload 方法、设置页检查更新卡片、Release/Tag 回退、
+  GitHub 下载页白名单和 release smoke 覆盖。该能力是手动下载更新，不是静默自动更新。
+  当前自动化 21 个测试文件 / 206 tests 通过；`release:smoke` 149 pass / 3 warning；`release:launch-smoke` 通过。
+- 2026-07-08 M9 GitHub 发布准备：新增 `scripts/create-github-release-assets.mjs` 和
+  `scripts/release-github-preflight.mjs`，接入 `release:github:*` npm 命令；GitHub Release 采用 multipart 7z 分卷，
+  避免单个 asset 超过 2GiB。

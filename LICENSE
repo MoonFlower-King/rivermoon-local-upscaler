@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 RiverMoon Local Upscaler Contributors
+Copyright (c) 2026 RiverMoon AI Studio Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-────────────────────────────────────────────────────────────────────────────
-注意（重要）：上述 MIT 许可仅覆盖本仓库内由本项目作者编写的源代码
-（src/、scripts/、docs/、配置文件等）。
-
-本应用在运行时会下载/捆绑下列第三方组件，它们各自带有独立且更严格的许可，
-不受本 MIT 许可约束，分发前必须单独确认。详见 NOTICE 文件：
-  - ComfyUI（GPL-3.0）
-  - PyTorch / CUDA 运行库（各自许可）
-  - 4x-UltraSharp.pth 超分模型（CC-BY-NC-SA 4.0，仅限非商业用途）
-────────────────────────────────────────────────────────────────────────────

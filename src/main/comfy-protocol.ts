@@ -8,6 +8,14 @@ import type { ImageDimensions } from "./types.js";
 /** ComfyUI 工作流节点 id：buildStandardPrompt、进度映射、取输出共用，改工作流时单点维护。 */
 export const NODE = { LOAD: "1", MODEL: "2", UPSCALE: "3", SCALE: "4", SAVE: "5" } as const;
 
+export const STANDARD_WORKFLOW_STEPS = [
+  { node: NODE.LOAD, classType: "LoadImage" },
+  { node: NODE.MODEL, classType: "UpscaleModelLoader", detail: "4x-UltraSharp.pth" },
+  { node: NODE.UPSCALE, classType: "ImageUpscaleWithModel" },
+  { node: NODE.SCALE, classType: "ImageScale", detail: "Lanczos target width/height" },
+  { node: NODE.SAVE, classType: "SaveImage" }
+] as const;
+
 export type ComfyHistoryItem = {
   status?: {
     status_str?: string;
@@ -121,6 +129,49 @@ export function buildStandardPrompt(
   };
 }
 
+export function describeStandardWorkflow(): string {
+  return STANDARD_WORKFLOW_STEPS.map((step) =>
+    "detail" in step ? `${step.classType}(${step.detail})` : step.classType
+  ).join(" -> ");
+}
+
+export function buildStandardPromptTemplate(modelName: string): Record<string, unknown> {
+  return {
+    [NODE.LOAD]: {
+      class_type: "LoadImage",
+      inputs: { image: "<comfy_input_file>" }
+    },
+    [NODE.MODEL]: {
+      class_type: "UpscaleModelLoader",
+      inputs: { model_name: modelName }
+    },
+    [NODE.UPSCALE]: {
+      class_type: "ImageUpscaleWithModel",
+      inputs: {
+        upscale_model: [NODE.MODEL, 0],
+        image: [NODE.LOAD, 0]
+      }
+    },
+    [NODE.SCALE]: {
+      class_type: "ImageScale",
+      inputs: {
+        image: [NODE.UPSCALE, 0],
+        upscale_method: "lanczos",
+        width: "<target_width>",
+        height: "<target_height>",
+        crop: "disabled"
+      }
+    },
+    [NODE.SAVE]: {
+      class_type: "SaveImage",
+      inputs: {
+        images: [NODE.SCALE, 0],
+        filename_prefix: "<output_prefix>"
+      }
+    }
+  };
+}
+
 /** 从 progress_state 事件的 nodes 快照映射出全局百分比（取各节点中最靠后的进度）。 */
 export function progressFromState(
   nodes: NonNullable<ComfyProgressPayload["data"]>["nodes"],
@@ -134,7 +185,8 @@ export function progressFromState(
     const node = state.node_id || key;
     const value = typeof state.value === "number" ? state.value : null;
     const max = typeof state.max === "number" && state.max > 0 ? state.max : null;
-    const ratio = state.state === "finished" ? 1 : value != null && max ? value / max : state.state === "running" ? 0 : null;
+    const ratio =
+      state.state === "finished" ? 1 : value != null && max ? value / max : state.state === "running" ? 0 : null;
     if (ratio == null) continue;
     const nodeBase = progressBaseForNode(node);
     const nodeSpan = progressSpanForNode(node);

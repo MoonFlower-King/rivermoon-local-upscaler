@@ -1,14 +1,4 @@
-# 网站同款 ComfyUI CUDA 引擎
-
-## 目标
-
-把旧网站 `AI` 高清按钮背后的本地 ComfyUI 链路放入桌面版：
-
-```text
-ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth
-```
-
-当前产品只保留这一条链路。
+# 本地 ComfyUI CUDA 超分引擎
 
 ## 工作流
 
@@ -20,93 +10,56 @@ LoadImage
 -> SaveImage
 ```
 
-默认最大长边是 `4096`。用户填 `0` 时真实 4x 输出。
+默认最大长边为 4096；设置为 `0` 时按模型真实 4x 输出。
 
-## Runtime 目录
+## 运行时
 
-```text
-resources\comfyui-runtime
-```
-
-最低结构：
+本地运行时目录：
 
 ```text
-resources\comfyui-runtime\
-  main.py
-  nodes.py
-  server.py
-  execution.py
-  folder_paths.py
-  comfy\
-  comfy_extras\
-  models\upscale_models\4x-UltraSharp.pth
-  python_embeded\python.exe
+resources/comfyui-runtime/
 ```
 
-## 进度同步
+运行时不进入 Git。准备方式见 [ASSET_SETUP.md](ASSET_SETUP.md)。
 
-`src/main/comfy-engine.ts` 使用固定 `client_id` 提交 prompt，并连接：
+## 真实进度
 
-```text
-/ws?clientId=...
-```
-
-优先处理新版 ComfyUI 的：
+`src/main/comfy-engine.ts` 使用独立 `client_id` 提交 prompt，并监听：
 
 ```text
 progress_state
-```
-
-兼容旧事件：
-
-```text
 progress
 executing
 execution_error
 execution_success
 ```
 
-同时轮询：
+同时低频轮询 `/history/{prompt_id}` 判断完成和补偿 websocket 漏事件。history 回退不伪造时间百分比。
 
-```text
-/history/{prompt_id}
-```
+## 取消与清理
 
-history 只用来判断完成和兜底漏事件，不按时间伪造进度。
+- 运行中取消会调用 `/interrupt`。
+- 排队任务会从 `/queue` 删除。
+- 任务结束后清理复制到 ComfyUI input/output 的临时文件。
+- ComfyUI 子进程在应用退出时关闭。
 
-## 打包
+## 模型
 
-`package.json` 只把网站同款必需资源打入 release：
+模型权重不进入 Git，也不随安装包分发。用户在应用中主动下载并校验 `4x-UltraSharp.pth`。许可证与商业风险见仓库根目录 [NOTICE](../NOTICE)。
 
-- `resources/comfyui-runtime`
-- `models/upscale_models/4x-UltraSharp.pth`
-- `docs`
-- `build/icon.ico`
+## 验证
 
-打包过滤掉 DiffBIR、SUPIR、其他 upscale 模型和旧轻量资源。
-
-## 验收
-
-```bash
+```powershell
 npm run build
 npm run dist:dir
+npm run release:smoke
+npm run release:launch-smoke
 ```
 
-启动：
+打包版入口：
 
 ```text
-release\win-unpacked\RiverMoon 本地超分.exe
+release/win-unpacked/RiverMoon AI 创作台.exe
 ```
 
-检查：
-
-- 右侧检测卡能检测 CUDA。
-- 只显示网站同款 AI。
-- 处理小图能输出。
-- 任务进度根据 ComfyUI 事件更新。
-
-## 限制
-
-- 需要 NVIDIA/CUDA。
-- 没有 CPU、DirectML、AMD/Intel fallback。
-- `4x-UltraSharp.pth` 商业授权需单独确认。
+当前不支持 CPU、DirectML、AMD 或 Intel fallback。

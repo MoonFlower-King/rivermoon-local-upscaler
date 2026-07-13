@@ -48,10 +48,10 @@ import {
   cancelModelDownload,
   cleanupStaleDownloads,
   getModelStatus,
-  MODEL_SPEC,
   onModelDownloadUpdate,
   startModelDownload
 } from "./model-downloader.js";
+import { findModelSpec } from "./model-registry.js";
 import { checkForUpdates, isAllowedUpdatePageUrl } from "./update-checker.js";
 import type { AccountStatus, AppInfo, AssetStatus, HardwareReport, StartJobsPayload } from "./types.js";
 
@@ -566,7 +566,7 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("model:get-status", () => getModelStatus());
-  ipcMain.handle("model:download", () => startModelDownload());
+  ipcMain.handle("model:download", (_event, fileName: unknown) => startModelDownload(fileName));
   ipcMain.handle("model:cancel-download", () => cancelModelDownload());
   onModelDownloadUpdate((state) => {
     mainWindow?.webContents.send("model:download-update", state);
@@ -640,20 +640,23 @@ async function buildDiagnostics(): Promise<string> {
 }
 
 async function buildLocalUpscaleDiagnostics(): Promise<string> {
-  const modelPath = findComfyModel(DEFAULT_MODEL);
+  // 按当前设置选用的模型做诊断（注册表内可切换：UltraSharp / RealESRGAN）。
+  const selectedModel = loadSettings().upscaleModel;
+  const spec = findModelSpec(selectedModel);
+  const modelPath = findComfyModel(selectedModel);
   const modelStat = modelPath ? await fs.stat(modelPath).catch(() => null) : null;
   const modelHash = modelPath ? await readModelSha256(modelPath) : { value: null, error: null };
-  const modelHashMatches = modelHash.value === MODEL_SPEC.sha256;
+  const modelHashMatches = spec != null && modelHash.value === spec.sha256;
   return [
     `工作流：${describeStandardWorkflow()}`,
-    `模型文件：${DEFAULT_MODEL}`,
+    `模型文件：${selectedModel}${spec ? `（${spec.license}）` : ""}`,
     `模型大小：${modelStat ? `${modelStat.size} bytes` : "未找到"}`,
     `模型 SHA256：${modelHash.value ?? (modelHash.error ? `计算失败：${modelHash.error}` : "未找到")}`,
-    `期望 SHA256：${MODEL_SPEC.sha256}`,
+    `期望 SHA256：${spec?.sha256 ?? "未知模型"}`,
     `模型校验：${modelHash.value ? (modelHashMatches ? "通过" : "不匹配") : modelHash.error ? "无法校验" : "未找到"}`,
     "默认尺寸策略：最大长边 4096；用户填 0 时按真实 4x 输出",
     "ComfyUI prompt 模板：",
-    JSON.stringify(buildStandardPromptTemplate(DEFAULT_MODEL), null, 2)
+    JSON.stringify(buildStandardPromptTemplate(selectedModel), null, 2)
   ].join("\n");
 }
 
@@ -726,7 +729,9 @@ function getAssetStatus(): AssetStatus {
 function getQualityModeStatus(): AssetStatus["qualityModes"] {
   const standardMissing: string[] = [];
   if (!comfyPythonReady()) standardMissing.push("ComfyUI Runtime");
-  if (!findComfyModel(DEFAULT_MODEL)) standardMissing.push(DEFAULT_MODEL);
+  // 以当前设置选用的模型为准（注册表内多模型可切换）。
+  const selectedModel = loadSettings().upscaleModel;
+  if (!findComfyModel(selectedModel)) standardMissing.push(selectedModel);
 
   return {
     standard: { ok: standardMissing.length === 0, label: "网站同款 AI", missing: standardMissing }

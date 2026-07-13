@@ -1037,6 +1037,39 @@ input[type="range"] {
   gap: 10px;
 }
 
+.model-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.model-option {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--separator);
+  background: var(--control-bg);
+  transition: border-color 130ms ease;
+}
+
+.model-option.on {
+  border-color: var(--accent);
+}
+
+.model-option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-option-meta {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* ── 生图工作区 ── */
 .gen-controls {
   display: grid;

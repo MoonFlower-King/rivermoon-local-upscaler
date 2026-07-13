@@ -107,7 +107,8 @@ export async function interruptComfy(): Promise<void> {
 }
 
 export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
-  assertQualityResources();
+  const modelName = options.settings.upscaleModel || DEFAULT_MODEL;
+  assertQualityResources(modelName);
 
   const comfyUrl = await ensureComfyReady(options.signal);
   activeComfyUrl = comfyUrl;
@@ -118,13 +119,13 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
   const copiedInputPath = path.join(comfyInputRoot(), inputName);
   try {
     const prefix = `rivermoon_ai_${jobId}`;
-    const prompt = buildStandardPrompt(inputName, DEFAULT_MODEL, options.targetDimensions, prefix);
+    const prompt = buildStandardPrompt(inputName, modelName, options.targetDimensions, prefix);
     const clientId = `rivermoon-desktop-${crypto.randomUUID()}`;
 
     options.onProgress?.(12);
     const promptId = await submitPrompt(comfyUrl, prompt, clientId, options.signal);
     activePromptId = promptId;
-    log(`ComfyUI 任务已提交 prompt=${promptId} model=${DEFAULT_MODEL}`);
+    log(`ComfyUI 任务已提交 prompt=${promptId} model=${modelName}`);
 
     const history = await waitForPrompt(comfyUrl, promptId, clientId, options.signal, options.onProgress);
     const comfyOutput = findSavedImage(history);
@@ -499,11 +500,9 @@ async function copyOrConvertOutput(sourcePath: string, outputPath: string, forma
   await pipeline.toFile(outputPath);
 }
 
-function assertQualityResources(): void {
-  if (!findComfyModel(DEFAULT_MODEL)) {
-    throw new Error(
-      `缺少 ComfyUI 超分模型 ${DEFAULT_MODEL}。请确认 comfyui-runtime/models/upscale_models 下存在该 .pth 文件。`
-    );
+function assertQualityResources(modelName: string): void {
+  if (!findComfyModel(modelName)) {
+    throw new Error(`缺少超分模型 ${modelName}。请在「图片超分」页下载该模型后重试。`);
   }
 }
 

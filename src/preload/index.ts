@@ -81,7 +81,7 @@ const api = {
   },
   getMediaUrl: (filePath: string) => ipcRenderer.invoke("media:local-url", filePath),
   getModelStatus: () => ipcRenderer.invoke("model:get-status"),
-  downloadModel: () => ipcRenderer.invoke("model:download"),
+  downloadModel: (fileName: string) => ipcRenderer.invoke("model:download", fileName),
   cancelModelDownload: () => ipcRenderer.invoke("model:cancel-download"),
   onModelDownload: (callback: (state: ModelDownloadState) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state as ModelDownloadState);

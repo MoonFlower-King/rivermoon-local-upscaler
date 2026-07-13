@@ -19,6 +19,8 @@ export type UpscaleSettings = {
   outputDirectory: string | null;
   /** 输出长边上限；0 = 不限制（真实放大倍数）。 */
   maxSide: number;
+  /** 超分模型文件名（必须在 model-registry 注册表内）；默认网站同款 4x-UltraSharp。 */
+  upscaleModel: string;
 };
 
 export type ImageDimensions = {
@@ -339,17 +341,30 @@ export type AgentChatEvent = {
 /** 超分模型下载状态（安装包不含权重，用户界面内自主下载）。 */
 export type ModelDownloadState = {
   phase: "idle" | "downloading" | "verifying" | "failed" | "done";
+  /** 正在（或最近一次）下载的模型文件名；空闲且从未下载时为 null。 */
+  fileName: string | null;
   receivedBytes: number;
   totalBytes: number;
   message: string | null;
 };
 
-export type UpscaleModelStatus = {
-  installed: boolean;
-  path: string | null;
+export type UpscaleModelInfo = {
   fileName: string;
+  displayName: string;
   sizeBytes: number;
   license: string;
+  commercial: boolean;
+  tagline: string;
+  installed: boolean;
+  path: string | null;
+};
+
+export type UpscaleModelStatus = {
+  /** 注册表全量模型及各自安装状态。 */
+  models: UpscaleModelInfo[];
+  /** 当前设置选用的模型（settings.upscaleModel 规整后）。 */
+  selectedFileName: string;
+  selectedInstalled: boolean;
   download: ModelDownloadState;
 };
 
@@ -446,7 +461,7 @@ export interface UpscalerApi {
   getMediaUrl(filePath: string): Promise<string | null>;
   /** 超分模型按需下载。 */
   getModelStatus(): Promise<UpscaleModelStatus>;
-  downloadModel(): Promise<void>;
+  downloadModel(fileName: string): Promise<void>;
   cancelModelDownload(): Promise<void>;
   onModelDownload(callback: (state: ModelDownloadState) => void): () => void;
 }

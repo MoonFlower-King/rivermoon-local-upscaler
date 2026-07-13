@@ -69,7 +69,8 @@ describe("normalizeJob", () => {
       processingMode: "aiUpscale",
       outputFormat: "png",
       outputDirectory: null,
-      maxSide: 4096
+      maxSide: 4096,
+      upscaleModel: "4x-UltraSharp.pth"
     });
   });
 });

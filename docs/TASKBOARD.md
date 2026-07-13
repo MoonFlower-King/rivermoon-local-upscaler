@@ -109,6 +109,17 @@
 | 9.2 | GitHub 分卷资产脚本 | ✅ | `npm run release:github:assets` 使用 7-Zip 生成 1900MB 分卷、SHA256、manifest、下载说明和 Release notes |
 | 9.3 | 发布文档更新 | ✅ | `docs/BUILD_AND_RELEASE.md` 记录 GitHub 发版步骤、7-Zip 要求、分卷下载说明、gh release create 示例 |
 
+### M10 可商用模型选项 + 遗留验证 ✅（2026-07-13）
+| # | 任务 | 状态 | 验收标准 |
+|---|---|---|---|
+| 10.1 | 超分模型注册表化：新增 model-registry.ts（UltraSharp 非商业 / RealESRGAN_x4plus BSD-3 可商用），settings.upscaleModel 贯通 comfy-engine/硬件检测/资源状态/诊断导出 | ✅ | **RealESRGAN 真实下载 E2E 通过**（hf-mirror 68s/67MB，SHA256 一致）；哈希为本机权重实测值 |
+| 10.2 | 引导卡改双模型选择（授权徽章/各自下载进度/使用中态），设置页模型切换（未装禁用） | ✅ | 选中态渲染层实时派生，规避 400ms 防抖迟滞 |
+| 10.3 | Program Files 回退分支实证 | ✅ | 只读 ACL 目录写探针 EPERM 实证 + fallback 目录/yaml 链路早前已实证 |
+| 10.4 | 生图/视频任务实时「已用」计时确认（M6/M5 重写后仍在） | ✅ | main.tsx 2409/3021 |
+| 10.5 | 生图模型列表合同驱动确认，pickImageModels 仅作兜底 → 关闭该遗留 | ✅ | resolveImageModels 优先 ImageContract.models |
+
+**商用授权阻断解除**：用户在应用内可选 RealESRGAN_x4plus（BSD-3 可商用）替代 UltraSharp；发版建议在商用文案中默认引导可商用模型。
+
 ### v2 远期（不在本期）
 - Midjourney（当前 Key 分组无渠道）。
 - 静默自动更新、代码签名。

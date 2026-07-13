@@ -300,6 +300,10 @@ function App() {
   }, [jobs]);
 
   const chainStatus = assetStatus?.qualityModes.standard;
+  // 所选模型是否已安装用渲染层实时值判断（settings 防抖落盘前主进程视角会滞后 400ms）。
+  const selectedModelInstalled = modelStatus
+    ? modelStatus.models.some((model) => model.fileName === settings.upscaleModel && model.installed)
+    : true;
   const needsAiResources = settings.processingMode !== "webClear";
   const chainReady = !needsAiResources || Boolean(chainStatus?.ok);
   const hasContent = pendingPaths.length > 0 || jobs.length > 0;
@@ -387,14 +391,16 @@ function App() {
             </div>
             <div className="workspace">
               <section className="left">
-                {needsAiResources && modelStatus && !modelStatus.installed ? (
+                {needsAiResources && modelStatus && !selectedModelInstalled ? (
                   <ModelSetupCard
                     status={modelStatus}
-                    onDownload={() => void window.upscaler.downloadModel()}
+                    selectedFileName={settings.upscaleModel}
+                    onDownload={(fileName) => void window.upscaler.downloadModel(fileName)}
+                    onUse={(fileName) => setSettings((current) => ({ ...current, upscaleModel: fileName }))}
                     onCancel={() => void window.upscaler.cancelModelDownload()}
                   />
                 ) : null}
-                {needsAiResources && modelStatus?.installed === false ? null : hasContent ? (
+                {needsAiResources && !selectedModelInstalled ? null : hasContent ? (
                   <div className={`dropstrip ${isDragging ? "dragging" : ""}`}>
                     <span className="dropstrip-hint">
                       <BrandMark size={16} /> 拖入图片或文件夹，或
@@ -463,6 +469,7 @@ function App() {
                   <SettingsPanel
                     settings={settings}
                     status={assetStatus}
+                    modelStatus={modelStatus}
                     onChange={setSettings}
                     onSelectOutputDirectory={() => void selectOutputDirectory()}
                   />
@@ -636,11 +643,13 @@ function StatusPill({
 function SettingsPanel({
   settings,
   status,
+  modelStatus,
   onChange,
   onSelectOutputDirectory
 }: {
   settings: UpscaleSettings;
   status: AssetStatus | null;
+  modelStatus: UpscaleModelStatus | null;
   onChange: (settings: UpscaleSettings) => void;
   onSelectOutputDirectory: () => void;
 }) {
@@ -672,9 +681,10 @@ function SettingsPanel({
   }
 
   const chainStatus = status?.qualityModes.standard;
+  const selectedModel = modelStatus?.models.find((model) => model.fileName === settings.upscaleModel) ?? null;
   const chainCopy = {
-    title: "网站同款 AI",
-    body: "4x-UltraSharp · 默认 4096 长边 · PNG 输出"
+    title: selectedModel?.commercial ? "本地 AI 超分" : "网站同款 AI",
+    body: `${selectedModel?.displayName ?? "4x-UltraSharp"} · 默认 4096 长边 · PNG 输出`
   };
 
   return (
@@ -690,6 +700,32 @@ function SettingsPanel({
         settings.processingMode === "webClear" ? null : (
           <p className="quality-warning">当前 AI 链路缺少：{chainStatus.missing.join("、")}</p>
         )
+      ) : null}
+
+      {modelStatus && modelStatus.models.length > 1 ? (
+        <div className="field">
+          <span className="field-label">超分模型</span>
+          <div className="radio-group">
+            {modelStatus.models.map((model) => (
+              <label className="radio-row" key={model.fileName}>
+                <input
+                  type="radio"
+                  name="upscale-model"
+                  disabled={!model.installed}
+                  checked={settings.upscaleModel === model.fileName}
+                  onChange={() => onChange({ ...settings, upscaleModel: model.fileName })}
+                />
+                <span>
+                  {model.displayName}
+                  <small>
+                    {model.commercial ? "可商用" : "仅限非商业"} ·{" "}
+                    {model.installed ? model.tagline : "未下载（在左侧模型卡下载后可选）"}
+                  </small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       <div className="field">
@@ -3134,11 +3170,15 @@ function AssetsModule({
 
 function ModelSetupCard({
   status,
+  selectedFileName,
   onDownload,
+  onUse,
   onCancel
 }: {
   status: UpscaleModelStatus;
-  onDownload: () => void;
+  selectedFileName: string;
+  onDownload: (fileName: string) => void;
+  onUse: (fileName: string) => void;
   onCancel: () => void;
 }) {
   const download = status.download;
@@ -3148,44 +3188,74 @@ function ModelSetupCard({
 
   return (
     <section className="panel model-setup">
-      <h2>下载超分模型</h2>
+      <h2>选择并下载超分模型</h2>
       <p className="hw-hint">
-        首次使用需要下载 AI 模型 {status.fileName}（约 {formatBytes(status.sizeBytes)}）。模型为开源权重，
-        由你自行下载到本机使用；授权：{status.license}。下载完成后自动校验完整性。
+        首次使用需要下载 AI 模型（各约 64MB）。模型为开源权重，由你自行下载到本机使用，下载后自动校验完整性。
+        商用场景请选择可商用授权的模型。
       </p>
-      {busy ? (
-        <>
-          <div
-            className="progress"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={percent}
-            aria-label="模型下载进度"
-          >
-            <div style={{ width: `${percent}%` }} />
-          </div>
-          <div className="model-setup-row">
-            <span className="hw-hint">
-              {download.phase === "verifying"
-                ? "正在校验文件完整性…"
-                : `${formatBytes(download.receivedBytes)} / ${formatBytes(download.totalBytes)}（${percent}%）`}
-            </span>
-            {download.phase === "downloading" ? (
-              <button className="secondary sm" onClick={onCancel}>
-                取消
-              </button>
-            ) : null}
-          </div>
-        </>
-      ) : (
-        <div className="model-setup-row">
-          <button className="primary" onClick={onDownload}>
-            {download.phase === "failed" ? "重试下载" : "下载模型"}
-          </button>
-          {download.message ? <span className="hint-warn">{download.message}</span> : null}
-        </div>
-      )}
+      <div className="model-options">
+        {status.models.map((model) => {
+          const isDownloadingThis = busy && download.fileName === model.fileName;
+          const isSelected = selectedFileName === model.fileName;
+          return (
+            <div className={`model-option ${isSelected ? "on" : ""}`} key={model.fileName}>
+              <div className="model-option-head">
+                <strong>{model.displayName}</strong>
+                <span className={`pill ${model.commercial ? "succeeded" : "cancelled"}`}>
+                  {model.commercial ? "可商用" : "仅限非商业"}
+                </span>
+              </div>
+              <span className="model-option-meta">
+                {model.tagline} · {formatBytes(model.sizeBytes)} · {model.license}
+              </span>
+              {isDownloadingThis ? (
+                <>
+                  <div
+                    className="progress"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={percent}
+                    aria-label={`${model.displayName} 下载进度`}
+                  >
+                    <div style={{ width: `${percent}%` }} />
+                  </div>
+                  <div className="model-setup-row">
+                    <span className="hw-hint">
+                      {download.phase === "verifying"
+                        ? "正在校验文件完整性…"
+                        : `${formatBytes(download.receivedBytes)} / ${formatBytes(download.totalBytes)}（${percent}%）`}
+                    </span>
+                    {download.phase === "downloading" ? (
+                      <button className="secondary sm" onClick={onCancel}>
+                        取消
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <div className="model-setup-row">
+                  {model.installed ? (
+                    isSelected ? (
+                      <span className="key-status ok">已安装 · 使用中</span>
+                    ) : (
+                      <button className="secondary sm" onClick={() => onUse(model.fileName)}>
+                        使用此模型
+                      </button>
+                    )
+                  ) : (
+                    <button className="primary sm" disabled={busy} onClick={() => onDownload(model.fileName)}>
+                      {download.phase === "failed" && download.fileName === model.fileName ? "重试下载" : "下载"}
+                    </button>
+                  )}
+                  {!model.installed && isSelected ? <span className="hint-warn">当前选用，需先下载</span> : null}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {download.message && !busy ? <span className="hint-warn">{download.message}</span> : null}
     </section>
   );
 }
@@ -3336,6 +3406,7 @@ function JobCard({
 function modelLicense(model: string): { text: string; warn: boolean } {
   const name = model.toLowerCase();
   if (name.includes("ultrasharp")) return { text: "CC-BY-NC-SA 4.0 · 仅限非商业", warn: true };
+  if (name.includes("realesrgan")) return { text: "BSD 3-Clause · 可商用", warn: false };
   return { text: "授权未知 · 商用前请自行确认", warn: true };
 }
 

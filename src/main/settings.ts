@@ -1,14 +1,16 @@
+import { DEFAULT_UPSCALE_MODEL, normalizeUpscaleModel } from "./model-registry.js";
 import type { ProcessingMode, UpscaleSettings } from "./types.js";
 
-/** 产品固定常量：网站同款 AI 链路只用 4x-UltraSharp，按 4x 放大。 */
-export const DEFAULT_MODEL = "4x-UltraSharp.pth";
+/** 默认模型 = 网站同款 4x-UltraSharp（可在注册表内切换）；固定按 4x 放大。 */
+export const DEFAULT_MODEL = DEFAULT_UPSCALE_MODEL;
 export const DEFAULT_SCALE = 4;
 
 export const DEFAULT_SETTINGS: UpscaleSettings = {
   processingMode: "aiUpscale",
   outputFormat: "png",
   outputDirectory: null,
-  maxSide: 4096
+  maxSide: 4096,
+  upscaleModel: DEFAULT_UPSCALE_MODEL
 };
 
 /** 把任意来源（IPC 载荷、磁盘 JSON）的设置规整成合法的 UpscaleSettings。 */
@@ -20,7 +22,8 @@ export function sanitizeSettings(input: unknown): UpscaleSettings {
     outputFormat: "png",
     outputDirectory:
       typeof merged.outputDirectory === "string" && merged.outputDirectory ? merged.outputDirectory : null,
-    maxSide: normalizeMaxSide(merged.maxSide)
+    maxSide: normalizeMaxSide(merged.maxSide),
+    upscaleModel: normalizeUpscaleModel(merged.upscaleModel)
   };
 }
 

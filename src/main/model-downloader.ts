@@ -4,29 +4,25 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { comfyUpscaleModelsRoot, extraModelPathsConfig, findComfyModel, userModelsRoot } from "./paths.js";
+import {
+  UPSCALE_MODEL_REGISTRY,
+  findModelSpec,
+  normalizeUpscaleModel,
+  type UpscaleModelSpec
+} from "./model-registry.js";
+import { loadSettings } from "./settings-store.js";
 import { log } from "./logger.js";
 import type { ModelDownloadState, UpscaleModelStatus } from "./types.js";
 
 /**
- * 超分模型按需下载：安装包不再分发 .pth 权重（非商业授权），
- * 由用户在界面里自主下载。流式下载 + SHA256 校验 + 原子落位；
- * runtime 目录不可写（如装进 Program Files）时回退 userData 并生成
- * extra_model_paths.yaml 挂给 ComfyUI。
+ * 超分模型按需下载：安装包不分发 .pth 权重，由用户在界面里自主下载。
+ * 注册表驱动（4x-UltraSharp 非商业 / RealESRGAN 可商用），流式下载 +
+ * SHA256 校验 + 原子落位；runtime 目录不可写（如装进 Program Files）时
+ * 回退 userData 并生成 extra_model_paths.yaml 挂给 ComfyUI。
+ * 同一时刻只允许一个下载任务。
  */
 
-export const MODEL_SPEC = {
-  fileName: "4x-UltraSharp.pth",
-  displayName: "4x-UltraSharp",
-  sizeBytes: 66_961_958,
-  sha256: "a5812231fc936b42af08a5edba784195495d303d5b3248c24489ef0c4021fe01",
-  license: "CC-BY-NC-SA 4.0（仅限非商业用途）",
-  urls: [
-    "https://hf-mirror.com/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth",
-    "https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth"
-  ]
-} as const;
-
-let state: ModelDownloadState = { phase: "idle", receivedBytes: 0, totalBytes: MODEL_SPEC.sizeBytes, message: null };
+let state: ModelDownloadState = { phase: "idle", fileName: null, receivedBytes: 0, totalBytes: 0, message: null };
 let controller: AbortController | null = null;
 let notify: ((next: ModelDownloadState) => void) | null = null;
 
@@ -35,13 +31,24 @@ export function onModelDownloadUpdate(callback: (next: ModelDownloadState) => vo
 }
 
 export function getModelStatus(): UpscaleModelStatus {
-  const installed = findComfyModel(MODEL_SPEC.fileName);
+  const selectedFileName = normalizeUpscaleModel(loadSettings().upscaleModel);
+  const models = UPSCALE_MODEL_REGISTRY.map((spec) => {
+    const installed = findComfyModel(spec.fileName);
+    return {
+      fileName: spec.fileName,
+      displayName: spec.displayName,
+      sizeBytes: spec.sizeBytes,
+      license: spec.license,
+      commercial: spec.commercial,
+      tagline: spec.tagline,
+      installed: Boolean(installed),
+      path: installed
+    };
+  });
   return {
-    installed: Boolean(installed),
-    path: installed,
-    fileName: MODEL_SPEC.fileName,
-    sizeBytes: MODEL_SPEC.sizeBytes,
-    license: MODEL_SPEC.license,
+    models,
+    selectedFileName,
+    selectedInstalled: models.some((model) => model.fileName === selectedFileName && model.installed),
     download: state
   };
 }
@@ -50,10 +57,22 @@ export function cancelModelDownload(): void {
   controller?.abort();
 }
 
-export async function startModelDownload(): Promise<void> {
+export async function startModelDownload(fileName: unknown): Promise<void> {
   if (state.phase === "downloading" || state.phase === "verifying") return;
+  const spec = findModelSpec(typeof fileName === "string" ? fileName : "");
+  if (!spec) {
+    setState({ phase: "failed", fileName: null, message: "未知的模型，请更新应用后重试。" });
+    return;
+  }
+
   controller = new AbortController();
-  setState({ phase: "downloading", receivedBytes: 0, totalBytes: MODEL_SPEC.sizeBytes, message: null });
+  setState({
+    phase: "downloading",
+    fileName: spec.fileName,
+    receivedBytes: 0,
+    totalBytes: spec.sizeBytes,
+    message: null
+  });
 
   let targetDir: string;
   try {
@@ -67,13 +86,13 @@ export async function startModelDownload(): Promise<void> {
   }
 
   let lastError = "下载失败";
-  for (const url of MODEL_SPEC.urls) {
+  for (const url of spec.urls) {
     try {
-      await downloadModelFile(url, targetDir, controller.signal, (receivedBytes, totalBytes) =>
+      await downloadModelFile(url, targetDir, spec, controller.signal, (receivedBytes, totalBytes) =>
         setState({ receivedBytes, totalBytes })
       );
-      setState({ phase: "done", receivedBytes: MODEL_SPEC.sizeBytes, message: null });
-      log(`模型下载完成 -> ${path.join(targetDir, MODEL_SPEC.fileName)}`);
+      setState({ phase: "done", receivedBytes: spec.sizeBytes, message: null });
+      log(`模型下载完成 ${spec.fileName} -> ${targetDir}`);
       return;
     } catch (error) {
       if (controller.signal.aborted) {
@@ -81,7 +100,7 @@ export async function startModelDownload(): Promise<void> {
         return;
       }
       lastError = error instanceof Error ? error.message : String(error);
-      log(`模型下载失败（${url}）：${lastError}，尝试下一个源`);
+      log(`模型下载失败 ${spec.fileName}（${url}）：${lastError}，尝试下一个源`);
     }
   }
   setState({ phase: "failed", message: `${lastError}。请检查网络后重试。` });
@@ -89,20 +108,21 @@ export async function startModelDownload(): Promise<void> {
 
 /**
  * 从单一源流式下载到 targetDir：临时文件累积 + 增量 SHA256 + 校验后原子改名。
- * 独立导出便于端到端测试指定目录。
+ * 独立导出便于端到端测试指定目录与模型。
  */
 export async function downloadModelFile(
   url: string,
   targetDir: string,
+  spec: UpscaleModelSpec,
   signal: AbortSignal,
   onProgress?: (receivedBytes: number, totalBytes: number) => void
 ): Promise<string> {
-  const finalPath = path.join(targetDir, MODEL_SPEC.fileName);
+  const finalPath = path.join(targetDir, spec.fileName);
   const tmpPath = `${finalPath}.download`;
 
   const response = await fetch(url, { signal });
   if (!response.ok || !response.body) throw new Error(`下载失败（HTTP ${response.status}）`);
-  const totalBytes = Number(response.headers.get("content-length")) || MODEL_SPEC.sizeBytes;
+  const totalBytes = Number(response.headers.get("content-length")) || spec.sizeBytes;
 
   const hash = crypto.createHash("sha256");
   const file = fs.createWriteStream(tmpPath);
@@ -124,7 +144,7 @@ export async function downloadModelFile(
 
     setState({ phase: "verifying", receivedBytes, totalBytes });
     const digest = hash.digest("hex").toLowerCase();
-    if (digest !== MODEL_SPEC.sha256) {
+    if (digest !== spec.sha256) {
       throw new Error("SHA256 校验失败：文件不完整或已被篡改");
     }
     await fsp.rename(tmpPath, finalPath);

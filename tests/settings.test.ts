@@ -38,6 +38,12 @@ describe("sanitizeSettings", () => {
 
   it("忽略已废弃的多余字段，只保留当前设置项", () => {
     const result = sanitizeSettings({ outputFormat: "png", model: "x", scale: 2, engineMode: "y" } as unknown);
-    expect(result).toEqual({ processingMode: "aiUpscale", outputFormat: "png", outputDirectory: null, maxSide: 4096 });
+    expect(result).toEqual({
+      processingMode: "aiUpscale",
+      outputFormat: "png",
+      outputDirectory: null,
+      maxSide: 4096,
+      upscaleModel: "4x-UltraSharp.pth"
+    });
   });
 });

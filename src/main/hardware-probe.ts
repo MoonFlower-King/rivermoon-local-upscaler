@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { comfyMainPath, comfyPythonPath, findComfyModel } from "./paths.js";
+import { UPSCALE_MODEL_REGISTRY } from "./model-registry.js";
 import { log } from "./logger.js";
 import type { GpuInfo, HardwareReport } from "./types.js";
 
@@ -29,12 +30,12 @@ function cachePath(): string {
   return path.join(app.getPath("userData"), "hardware-cache.json");
 }
 
-/** ComfyUI Runtime 和 4x-UltraSharp 模型指纹；任一变化即让缓存失效。 */
+/** ComfyUI Runtime 与注册表全部模型的指纹；任一变化即让缓存失效。 */
 function hardwareFingerprint(): string {
   const comfyPython = comfyPythonPath() ?? "none";
   const comfyMain = fs.existsSync(comfyMainPath()) ? comfyMainPath() : "none";
-  const comfyModel = findComfyModel("4x-UltraSharp.pth") ?? "none";
-  return `${comfyPython}|${comfyMain}|${comfyModel}`;
+  const models = UPSCALE_MODEL_REGISTRY.map((spec) => findComfyModel(spec.fileName) ?? "none").join(",");
+  return `${comfyPython}|${comfyMain}|${models}`;
 }
 
 function readCache(): { fingerprint: string; report: HardwareReport } | null {
@@ -66,7 +67,8 @@ export async function probeHardware(): Promise<HardwareReport> {
 
   // 运行时（引擎）与模型分开判断：模型按需下载是正常状态，不应报成“引擎缺失”。
   const comfyRuntimeFound = Boolean(comfyPythonPath() && fs.existsSync(comfyMainPath()));
-  const modelFound = Boolean(findComfyModel("4x-UltraSharp.pth"));
+  // 注册表内任一模型已安装即认为链路具备模型（所选模型缺失由资源状态另行提示）。
+  const modelFound = UPSCALE_MODEL_REGISTRY.some((spec) => Boolean(findComfyModel(spec.fileName)));
   const gpus = await queryGpus();
 
   if (!comfyRuntimeFound) {

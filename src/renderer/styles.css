@@ -454,7 +454,17 @@ input[type="range"] {
 
 .account-balance {
   font-size: 18px;
-  font-weight: 650;
+  /* 字重限定 400/500/600（650 对雅黑等非可变字体无效，会被取整）。 */
+  font-weight: 600;
+}
+
+/* 低余额提醒：整卡橙色微染 + 余额橙字，引导充值。 */
+.account-card.low {
+  background: var(--orange-bg);
+}
+
+.account-balance.warn {
+  color: var(--orange-text);
 }
 
 .account-note {
@@ -1766,8 +1776,10 @@ input[type="range"] {
 
 /* ── GPT 对话 ── */
 .agent-shell {
+  /* 112px = shell 上下留白 + 模块头高度；min-height 不得超过窗口 minHeight(680) 的可用区，
+     否则小窗下撑破视口出现双滚动。 */
   height: calc(100vh - 112px);
-  min-height: 620px;
+  min-height: 480px;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   overflow: hidden;

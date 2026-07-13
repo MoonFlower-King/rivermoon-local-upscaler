@@ -835,20 +835,22 @@ function AccountCard({
         : account.usedUsd != null
           ? `已用 $${account.usedUsd.toFixed(2)}`
           : "—";
+  // 低余额（<$1，约 10 次生图余量）主动提醒：变橙 + 引导充值，服务复购漏斗。
+  const lowBalance = remaining != null && account.totalUsd != null && account.totalUsd < 1_000_000 && remaining < 1;
   return (
-    <div className="account-card">
+    <div className={`account-card ${lowBalance ? "low" : ""}`}>
       <div className="account-card-head">
         <WalletCards size={15} aria-hidden="true" />
         <span>可用余额</span>
       </div>
       <div className="account-balance-row">
-        <strong className="account-balance">{balanceText}</strong>
+        <strong className={`account-balance ${lowBalance ? "warn" : ""}`}>{balanceText}</strong>
         <button className="primary sm" onClick={onTopup}>
           充值
         </button>
       </div>
       <span className="account-note">
-        {account.maskedKey} · {account.models.length} 个模型
+        {lowBalance ? "余额即将用完，充值后继续创作" : `${account.maskedKey} · ${account.models.length} 个模型`}
       </span>
     </div>
   );
@@ -2414,6 +2416,11 @@ function ImageTaskCard({
         {active ? (
           <button className="secondary sm" onClick={() => void window.upscaler.cancelImageTask(task.id)}>
             取消
+          </button>
+        ) : null}
+        {task.status === "succeeded" ? (
+          <button className="secondary sm" onClick={() => void window.upscaler.startImageTask(task.params)}>
+            再来一张
           </button>
         ) : null}
       </div>

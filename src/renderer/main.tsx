@@ -62,6 +62,7 @@ import {
   resolveImageRerunReferences
 } from "./image-edit-state";
 import { appendImageTaskIdInSubmissionOrder, mergeImageTaskTimeline } from "./image-task-timeline";
+import { IMAGE_TOPUP_REQUIRED_MESSAGE, imageAccountNeedsTopup } from "./image-submit-state";
 import { videoTaskDiagnosticText } from "./video-diagnostics";
 import { pruneVideoReferenceTypeMap, resolveRendererVideoReferenceTypes } from "./video-reference-types";
 import { videoSubmitBlockReason } from "./video-submit-state";
@@ -169,9 +170,12 @@ function App() {
     return () => clearTimeout(timer);
   }, [finishedCloudTaskCount]);
 
-  // 窗口重新聚焦时刷新资源与任务状态，替代旧的手动“刷新状态”按钮。
+  // 窗口重新聚焦时刷新资源、任务与账户状态；充值返回后也能立即解除余额门禁。
   useEffect(() => {
-    const onFocus = () => void refresh();
+    const onFocus = () => {
+      void refresh();
+      void window.upscaler.getAccountStatus(true).then(setAccount);
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -2162,6 +2166,7 @@ function ImageGenModule({
   }, [active, appliedParamsKey, contract?.defaultModelId, conversationsReady, models, paramsApplyKey]);
 
   const connected = Boolean(account?.connected);
+  const needsTopupBeforeImage = imageAccountNeedsTopup(account);
   const contractReady = Boolean(contract?.ok && models.length > 0);
   const referenceOk = referencePaths.length === 0 || (referenceLimit > 0 && referencePaths.length <= referenceLimit);
   const submitBlockReason =
@@ -2169,22 +2174,29 @@ function ImageGenModule({
       ? "正在载入创作会话。"
       : !connected
         ? "请先连接 RiverMoon 账户。"
-        : !contractReady
-          ? contract?.error || "图片能力合同不可用。"
-          : !model
-            ? "当前 Key 没有可用图片模型。"
-            : !prompt.trim()
-              ? "请输入提示词。"
-              : customError
-                ? customError
-                : !referenceOk
-                  ? referenceLimit <= 0
-                    ? "当前模型不支持参考图/编辑。"
-                    : `参考图数量超过当前模型上限（${referenceLimit} 张）。`
-                  : null;
+        : needsTopupBeforeImage
+          ? IMAGE_TOPUP_REQUIRED_MESSAGE
+          : !contractReady
+            ? contract?.error || "图片能力合同不可用。"
+            : !model
+              ? "当前 Key 没有可用图片模型。"
+              : !prompt.trim()
+                ? "请输入提示词。"
+                : customError
+                  ? customError
+                  : !referenceOk
+                    ? referenceLimit <= 0
+                      ? "当前模型不支持参考图/编辑。"
+                      : `参考图数量超过当前模型上限（${referenceLimit} 张）。`
+                    : null;
   const canGenerate = submitBlockReason === null;
 
   async function submitImageTask(params: ImageGenParams, conversationId: string, updateTitle: boolean) {
+    if (needsTopupBeforeImage) {
+      setSubmitNote(null);
+      showImageNotice(IMAGE_TOPUP_REQUIRED_MESSAGE);
+      return;
+    }
     const order = ++submissionCounterRef.current;
     const pending: PendingImageSubmission = {
       id: randomId(),
@@ -2776,6 +2788,14 @@ function ImageGenModule({
                       <span>准备生成 {count} 张图片</span>
                     )}
                     {submitNote ? <span className="submit-block-reason">{submitNote}</span> : null}
+                    {needsTopupBeforeImage ? (
+                      <button
+                        className="link-button imagegen-topup-link"
+                        onClick={() => void window.upscaler.openTopup()}
+                      >
+                        去充值
+                      </button>
+                    ) : null}
                   </div>
                   <button className="primary gen-btn" disabled={!canGenerate} onClick={() => void generate()}>
                     生成 {count > 1 ? `${count} 张` : "图片"}

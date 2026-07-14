@@ -1899,7 +1899,7 @@ input[type="range"] {
 }
 
 .imagegen-composer {
-  max-height: 66%;
+  max-height: calc((100vh - 112px) * 0.74);
   min-height: 0;
   overflow: auto;
   display: grid;
@@ -1916,6 +1916,11 @@ input[type="range"] {
 .imagegen-parameters .image-control-grid {
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 8px;
+}
+
+.imagegen-parameters .image-control-grid select {
+  width: 100%;
+  min-width: 0;
 }
 
 .imagegen-parameters .image-model-field {
@@ -1941,6 +1946,10 @@ input[type="range"] {
 
 .imagegen-prompt-area .image-submit-bar {
   padding-top: 8px;
+}
+
+.imagegen-topup-link {
+  justify-self: start;
 }
 
 .agent-history {
@@ -2245,7 +2254,7 @@ input[type="range"] {
   }
 
   .imagegen-composer {
-    max-height: 72%;
+    max-height: calc((100vh - 112px) * 0.72);
   }
 
   .imagegen-parameters .storyboard-section {

@@ -82,7 +82,7 @@ const IMAGE_CONV_KEY = "rivermoon-image-conversations-v1";
 - [ ] 生成 → 点「编辑此图」→ 输出图进参考图 → 改 prompt 再生成 → edits 链路出图（NewAPI 日志可见 /v1/images/edits）。
 - [ ] 关闭重开：会话列表、标题、任务关联完好；升级场景旧任务进「历史生成」会话。
 - [ ] 删除会话不影响其他会话任务；删光自动建新会话。
-- [ ] `npm run check` 全绿（214+ 测试，新增 C1 测试）；`release:launch-smoke` 通过；深浅色双主题目检。
+- [x] `npm run check` 全绿（214+ 测试，新增 C1 测试）；`release:launch-smoke` 通过；深浅色双主题目检。
 - [ ] 真实 Key GUI 验收：会话内文生图 + 编辑图各一次成功。
 
 ## 8. 明确不做（防scope蔓延）

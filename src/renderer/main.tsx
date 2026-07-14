@@ -1531,7 +1531,9 @@ function normalizeAgentMessage(input: unknown): AgentMessage | null {
         .filter((item): item is AgentAttachment => Boolean(item?.dataUrl && item.mimeType?.startsWith("image/")))
         .slice(0, 4)
     : [];
-  if (!content && attachments.length === 0) return null;
+  // 空的 assistant 消息是流式回复的合法占位（delta 逐步写入），不能过滤——
+  // 否则占位一进会话就被删，所有 delta 找不到目标消息，气泡永远不出现。
+  if (raw.role === "user" && !content && attachments.length === 0) return null;
   return {
     id: typeof raw.id === "string" && raw.id ? raw.id : randomId(),
     role: raw.role,

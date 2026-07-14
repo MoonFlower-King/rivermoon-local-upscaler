@@ -120,6 +120,19 @@
 
 **商用授权阻断解除**：用户在应用内可选 RealESRGAN_x4plus（BSD-3 可商用）替代 UltraSharp；发版建议在商用文案中默认引导可商用模型。
 
+### M11 生图会话式工作台 ⬜（2026-07-14 需求确认，参照 img.rivermoon7.com 网页版布局）
+用户痛点：① 提交后感觉只能一个个等（队列并行度=2 已在，但 UI 是单表单+全局记录流，没有并行感）；② 生成结果不能继续编辑；③ 要像网页版一样左侧独立会话。
+
+| # | 任务 | 验收标准 |
+|---|---|---|
+| 11.1 | 生图会话数据模型：ImageConversation{id,title,taskIds,params 快照,createdAt,updatedAt}，localStorage 持久化（key `rivermoon-image-conversations-v1`），**完全照搬 GPT 模块的会话模式**（main.tsx AGENT_STORAGE_KEY/loadAgentConversations/normalizeAgentConversation 一套，含 80 会话上限与 normalize） | 关闭重开会话仍在；损坏 JSON 安全回退 |
+| 11.2 | 布局重构为双栏（复用 .agent-shell 系列样式）：左=会话列表（缩略图/标题/时间/新建/删除），右=会话内容流（该会话的任务卡按时间流展示）+ 底部参数条（模型/比例/尺寸/质量/格式/张数/原生直出/参考图）+ 输入框 | 新会话即发即插卡，多会话/多任务并行跑互不阻塞（队列并行度已支持，纯 UI 呈现问题） |
+| 11.3 | 结果图一键「编辑」：输出图直接作为参考图切入编辑模式（M6 的 edits FormData 链路已在，只differ UI 入口）+「再来一张」保留 | 生成→编辑→再生成 闭环不离开会话 |
+| 11.4 | 任务与会话关联：ImageGenTask 不动（主进程零改动），渲染层用 conversationId->taskIds 映射；旧「生成记录」平铺视图移除，历史任务归入「默认会话」 | 主进程/IPC/持久化格式零变更；升级用户旧任务不丢 |
+| 11.5 | 门禁 + launch-smoke + 真实 Key 会话内连发 3 张验证并行感 | check 全绿 |
+
+实施注意：**建议在 main.tsx 拆分（任务芯片 task_e0d890d3）之后做**，或拆分时把生图模块先拆出来再重构；纯渲染层工程，主进程不动。
+
 ### v2 远期（不在本期）
 - Midjourney（当前 Key 分组无渠道）。
 - 静默自动更新、代码签名。

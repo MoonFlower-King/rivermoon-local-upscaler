@@ -485,6 +485,17 @@ input[type="range"] {
   min-width: 0;
 }
 
+.module-pane {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.module-pane[hidden] {
+  display: none;
+}
+
 .module-head {
   display: flex;
   justify-content: space-between;
@@ -1115,7 +1126,7 @@ input[type="range"] {
   padding: 0 14px;
   background: transparent;
   color: var(--text-2);
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -1139,7 +1150,7 @@ input[type="range"] {
   background: var(--control-bg);
   color: var(--text-2);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .image-workbench {
@@ -1282,7 +1293,7 @@ input[type="range"] {
   background: var(--control-bg);
   color: var(--text);
   padding: 0 12px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -1789,6 +1800,125 @@ input[type="range"] {
   box-shadow: var(--shadow-1);
 }
 
+.imagegen-shell {
+  height: calc(100vh - 112px);
+  min-height: 480px;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--surface-card);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-1);
+}
+
+.image-conversation {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.image-conversation-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+}
+
+.image-conversation-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+
+.image-conversation-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.image-conversation .agent-conversation-title,
+.image-conversation .agent-conversation-time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-conversation .count-badge {
+  justify-self: end;
+}
+
+.imagegen-main {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.imagegen-toolbar-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.imagegen-feed {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.imagegen-task-list {
+  align-content: start;
+}
+
+.imagegen-empty {
+  min-height: 100%;
+  place-content: center;
+}
+
+.imagegen-composer {
+  max-height: 66%;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--separator);
+  background: var(--surface-thick);
+}
+
+.imagegen-parameters {
+  gap: 9px;
+}
+
+.imagegen-parameters .image-control-grid {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.imagegen-parameters .image-model-field {
+  grid-column: span 2;
+}
+
+.imagegen-parameters .storyboard-section {
+  grid-template-columns: auto minmax(150px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.imagegen-prompt-area {
+  display: grid;
+  gap: 8px;
+}
+
+.imagegen-prompt-area .image-stage-prompt {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.imagegen-prompt-area .image-submit-bar {
+  padding-top: 8px;
+}
+
 .agent-history {
   min-height: 0;
   display: flex;
@@ -2076,12 +2206,27 @@ input[type="range"] {
 }
 
 @media (max-width: 1120px) {
-  .agent-shell {
+  .agent-shell,
+  .imagegen-shell {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
-  .agent-toolbar {
+  .agent-toolbar,
+  .imagegen-toolbar {
     flex-direction: column;
+  }
+
+  .imagegen-toolbar-meta {
+    justify-content: flex-start;
+  }
+
+  .imagegen-composer {
+    max-height: 72%;
+  }
+
+  .imagegen-parameters .storyboard-section {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 }
 

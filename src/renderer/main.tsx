@@ -6,7 +6,9 @@ import {
   ImageUp,
   Images,
   MessageSquareText,
+  Plus,
   Settings as SettingsIcon,
+  Trash2,
   WalletCards
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -24,6 +26,7 @@ import type {
   ImageContract,
   ImageContractModel,
   ImageFitMode,
+  ImageGenParams,
   ImageGenTask,
   ImageOutputFormat,
   ImageQuality,
@@ -41,6 +44,16 @@ import type {
   VideoReferenceType
 } from "../main/types";
 import "./styles.css";
+import {
+  IMAGE_CONV_KEY,
+  createImageConversation,
+  loadImageConversations,
+  migrateLegacyImageTasks,
+  normalizeImageConversation,
+  saveImageConversations,
+  type ImageConversation
+} from "./image-conversations";
+import { appendImageTaskIdInSubmissionOrder, mergeImageTaskTimeline } from "./image-task-timeline";
 import { videoTaskDiagnosticText } from "./video-diagnostics";
 import { pruneVideoReferenceTypeMap, resolveRendererVideoReferenceTypes } from "./video-reference-types";
 import { videoSubmitBlockReason } from "./video-submit-state";
@@ -94,6 +107,7 @@ function App() {
   const [accountBusy, setAccountBusy] = useState(false);
   const [imageContract, setImageContract] = useState<ImageContract | null>(null);
   const [imageTasks, setImageTasks] = useState<ImageGenTask[]>([]);
+  const [imageTasksLoaded, setImageTasksLoaded] = useState(false);
   const [videoTasks, setVideoTasks] = useState<VideoGenTask[]>([]);
   const [videoContract, setVideoContract] = useState<VideoContract | null>(null);
   const [modelStatus, setModelStatus] = useState<UpscaleModelStatus | null>(null);
@@ -107,7 +121,10 @@ function App() {
     });
     void init();
     const unsubscribeJobs = window.upscaler.onJobsUpdated(setJobs);
-    const unsubscribeImages = window.upscaler.onImageTasksUpdated(setImageTasks);
+    const unsubscribeImages = window.upscaler.onImageTasksUpdated((tasks) => {
+      setImageTasks(tasks);
+      setImageTasksLoaded(true);
+    });
     const unsubscribeVideos = window.upscaler.onVideoTasksUpdated(setVideoTasks);
     const unsubscribeModel = window.upscaler.onModelDownload((state) => {
       setModelStatus((current) => (current ? { ...current, download: state } : current));
@@ -189,6 +206,7 @@ function App() {
     setAppInfo(info);
     setSettings(saved);
     setSettingsLoaded(true);
+    setImageTasksLoaded(true);
     // 启动即自动自检（命中缓存时瞬时返回），用户不再需要自己发现“检测”按钮。
     void probeHardware(false);
     // 账户状态并行加载，不阻塞首屏。
@@ -261,6 +279,14 @@ function App() {
   function upscaleImage(path: string) {
     void window.upscaler.startJobs({ paths: [path], settings });
     selectModule("upscale");
+  }
+
+  function registerImageTask(task: ImageGenTask) {
+    setImageTasks((current) =>
+      current.some((item) => item.id === task.id)
+        ? current
+        : [task, ...current].sort((left, right) => right.createdAt - left.createdAt)
+    );
   }
 
   // 拖拽计数：dragleave 在进入子元素时也会触发，必须配对计数才能避免高亮闪烁。
@@ -479,17 +505,19 @@ function App() {
           </>
         ) : null}
 
-        {module === "imagegen" ? (
+        <section className="module-pane" hidden={module !== "imagegen"} aria-hidden={module !== "imagegen"}>
           <ImageGenModule
             account={account}
             contract={imageContract}
             tasks={imageTasks}
+            tasksLoaded={imageTasksLoaded}
             now={now}
             onGoSettings={() => selectModule("settings")}
             onUpscale={upscaleImage}
+            onTaskStarted={registerImageTask}
             onRefreshContract={() => void window.upscaler.getImageContract().then(setImageContract)}
           />
-        ) : null}
+        </section>
         {module === "videogen" ? (
           <VideoGenModule
             account={account}
@@ -1905,24 +1933,42 @@ function validateRendererCustomSize(model: ImageContractModel, widthValue: strin
   return null;
 }
 
+type PendingImageSubmission = {
+  id: string;
+  conversationId: string;
+  params: ImageGenParams;
+  order: number;
+};
+
 function ImageGenModule({
   account,
   contract,
   tasks,
+  tasksLoaded,
   now,
   onGoSettings,
   onUpscale,
+  onTaskStarted,
   onRefreshContract
 }: {
   account: AccountStatus | null;
   contract: ImageContract | null;
   tasks: ImageGenTask[];
+  tasksLoaded: boolean;
   now: number;
   onGoSettings: () => void;
   onUpscale: (path: string) => void;
+  onTaskStarted: (task: ImageGenTask) => void;
   onRefreshContract: () => void;
 }) {
   const models = useMemo(() => resolveImageModels(contract, account?.models ?? []), [account, contract]);
+  const storageExistsRef = useRef(window.localStorage.getItem(IMAGE_CONV_KEY) !== null);
+  const [conversations, setConversations] = useState<ImageConversation[]>(() =>
+    loadImageConversations(window.localStorage)
+  );
+  const conversationsRef = useRef(conversations);
+  const [activeId, setActiveId] = useState(() => conversations[0]?.id ?? "");
+  const [conversationsReady, setConversationsReady] = useState(false);
   const [selectedModel, setSelectedModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [ratio, setRatio] = useState("16:9");
@@ -1939,6 +1985,79 @@ function ImageGenModule({
   const [referenceNote, setReferenceNote] = useState<string | null>(null);
   const [templateTheme, setTemplateTheme] = useState("");
   const [submitNote, setSubmitNote] = useState<string | null>(null);
+  const [pendingSubmissions, setPendingSubmissions] = useState<PendingImageSubmission[]>([]);
+  const [taskSubmissionOrders, setTaskSubmissionOrders] = useState<Record<string, number>>({});
+  const [appliedParamsKey, setAppliedParamsKey] = useState("");
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const submissionOrderRef = useRef<Record<string, number>>({});
+  const submissionCounterRef = useRef(0);
+
+  const active = conversations.find((conversation) => conversation.id === activeId) ?? conversations[0] ?? null;
+  const tasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const activeTasks = useMemo(() => {
+    if (!active) return [];
+    return active.taskIds
+      .map((id) => tasksById.get(id))
+      .filter((task): task is ImageGenTask => Boolean(task))
+      .reverse();
+  }, [active, tasksById]);
+  const activePendingSubmissions = useMemo(
+    () =>
+      pendingSubmissions
+        .filter((submission) => submission.conversationId === active?.id)
+        .sort((left, right) => right.order - left.order),
+    [active?.id, pendingSubmissions]
+  );
+  const pendingCountByConversation = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const submission of pendingSubmissions) {
+      counts.set(submission.conversationId, (counts.get(submission.conversationId) ?? 0) + 1);
+    }
+    return counts;
+  }, [pendingSubmissions]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
+    if (!tasksLoaded || conversationsReady) return;
+    let next = conversations;
+    if (next.length === 0) {
+      next = migrateLegacyImageTasks({
+        conversations: next,
+        legacyTasks: tasks,
+        storageExists: storageExistsRef.current
+      });
+    }
+    if (next.length === 0) next = [createImageConversation()];
+    setConversations(next);
+    setActiveId((current) => (next.some((conversation) => conversation.id === current) ? current : next[0]!.id));
+    setConversationsReady(true);
+  }, [conversations, conversationsReady, tasks, tasksLoaded]);
+
+  useEffect(() => {
+    if (!conversationsReady) return;
+    const timer = window.setTimeout(() => {
+      try {
+        saveImageConversations(window.localStorage, conversations);
+      } catch {
+        setSubmitNote("会话保存失败，请检查本机存储空间。");
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [conversations, conversationsReady]);
+
+  useEffect(() => {
+    if (!conversationsReady) return;
+    return () => {
+      try {
+        saveImageConversations(window.localStorage, conversationsRef.current);
+      } catch {
+        // 组件卸载时无法再安全显示错误，下一次会话变更会重试保存。
+      }
+    };
+  }, [conversationsReady]);
 
   const model = selectImageModel(models, selectedModel, contract?.defaultModelId);
   const ratios = imageRatiosForModel(model);
@@ -1963,32 +2082,149 @@ function ImageGenModule({
   const referenceLimit = model?.maxReferences ?? 0;
   const effectiveReferences = referencePaths.slice(0, referenceLimit);
   const customError = customEnabled && model ? validateRendererCustomSize(model, customWidth, customHeight) : null;
+  const modelSignature = `${contract?.contractVersion ?? ""}:${models.map((item) => item.publicName).join("|")}`;
+  const paramsApplyKey = active ? `${active.id}:${modelSignature}` : "";
+
+  useEffect(() => {
+    if (!active || !conversationsReady) return;
+    if (appliedParamsKey === paramsApplyKey) return;
+
+    const timer = window.setTimeout(() => {
+      const params = active.lastParams;
+      if (params) {
+        const targetModel = selectImageModel(models, params.model, contract?.defaultModelId);
+        const parsedSize = parseImageSize(params.size);
+        setSelectedModel(params.model);
+        setPrompt(params.prompt);
+        setRatio(imageRatioFromSize(params.size) ?? imageRatiosForModel(targetModel)[0] ?? "16:9");
+        setSize(params.size);
+        setCount(params.count);
+        setQuality(params.quality);
+        setOutputFormat(params.outputFormat);
+        setFitMode(params.fitMode);
+        setSizeMode(params.sizeMode);
+        setCustomEnabled(Boolean(targetModel?.customSize.enabled && !targetModel.sizes.includes(params.size)));
+        setCustomWidth(String(parsedSize?.width ?? 1024));
+        setCustomHeight(String(parsedSize?.height ?? 1024));
+        setReferencePaths(params.referencePaths.filter((path) => path !== "[已上传参考图]"));
+      } else {
+        const targetModel = selectImageModel(models, "", contract?.defaultModelId);
+        const defaultRatios = imageRatiosForModel(targetModel);
+        const defaultRatio = defaultRatios.includes("16:9") ? "16:9" : (defaultRatios[0] ?? "16:9");
+        const defaultSize = preferredImageSize(targetModel, defaultRatio);
+        const parsedSize = parseImageSize(defaultSize);
+        const defaultQualities = targetModel?.qualities.length ? targetModel.qualities : (["auto"] as ImageQuality[]);
+        const defaultFormats = targetModel?.outputFormats.length
+          ? targetModel.outputFormats
+          : (["png"] as ImageOutputFormat[]);
+        const defaultSizeModes = targetModel?.sizeModes.length
+          ? targetModel.sizeModes
+          : (["postprocess"] as ImageSizeMode[]);
+        setSelectedModel(targetModel?.publicName ?? "");
+        setPrompt("");
+        setRatio(defaultRatio);
+        setSize(defaultSize);
+        setCount(1);
+        setQuality(defaultQualities.includes("high") ? "high" : defaultQualities[0]!);
+        setOutputFormat(defaultFormats.includes("png") ? "png" : defaultFormats[0]!);
+        setFitMode("contain");
+        setSizeMode(defaultSizeModes.includes("postprocess") ? "postprocess" : defaultSizeModes[0]!);
+        setCustomEnabled(false);
+        setCustomWidth(String(parsedSize?.width ?? 1024));
+        setCustomHeight(String(parsedSize?.height ?? 1024));
+        setReferencePaths([]);
+      }
+      setReferenceNote(null);
+      setTemplateTheme("");
+      setSubmitNote(null);
+      setAppliedParamsKey(paramsApplyKey);
+    });
+    return () => window.clearTimeout(timer);
+  }, [active, appliedParamsKey, contract?.defaultModelId, conversationsReady, models, paramsApplyKey]);
 
   const connected = Boolean(account?.connected);
   const contractReady = Boolean(contract?.ok && models.length > 0);
   const referenceOk = referencePaths.length === 0 || (referenceLimit > 0 && referencePaths.length <= referenceLimit);
-  const submitBlockReason = !connected
-    ? "请先连接 RiverMoon 账户。"
-    : !contractReady
-      ? contract?.error || "图片能力合同不可用。"
-      : !model
-        ? "当前 Key 没有可用图片模型。"
-        : !prompt.trim()
-          ? "请输入提示词。"
-          : customError
-            ? customError
-            : !referenceOk
-              ? referenceLimit <= 0
-                ? "当前模型不支持参考图/编辑。"
-                : `参考图数量超过当前模型上限（${referenceLimit} 张）。`
-              : null;
+  const submitBlockReason =
+    !conversationsReady || !active || appliedParamsKey !== paramsApplyKey
+      ? "正在载入创作会话。"
+      : !connected
+        ? "请先连接 RiverMoon 账户。"
+        : !contractReady
+          ? contract?.error || "图片能力合同不可用。"
+          : !model
+            ? "当前 Key 没有可用图片模型。"
+            : !prompt.trim()
+              ? "请输入提示词。"
+              : customError
+                ? customError
+                : !referenceOk
+                  ? referenceLimit <= 0
+                    ? "当前模型不支持参考图/编辑。"
+                    : `参考图数量超过当前模型上限（${referenceLimit} 张）。`
+                  : null;
   const canGenerate = submitBlockReason === null;
 
-  async function generate() {
-    if (!canGenerate) return;
+  async function submitImageTask(params: ImageGenParams, conversationId: string, updateTitle: boolean) {
+    const order = ++submissionCounterRef.current;
+    const pending: PendingImageSubmission = {
+      id: randomId(),
+      conversationId,
+      params: { ...params, referencePaths: [...params.referencePaths] },
+      order
+    };
     setSubmitNote(null);
+    setPendingSubmissions((current) => [...current, pending]);
+    setConversations((current) =>
+      current
+        .map((conversation) => {
+          if (conversation.id !== conversationId) return conversation;
+          const firstSubmission = conversation.taskIds.length === 0 && conversation.lastParams === null;
+          return normalizeImageConversation({
+            ...conversation,
+            title:
+              updateTitle && firstSubmission && !conversation.renamed
+                ? params.prompt.replace(/\s+/g, " ").trim().slice(0, 80)
+                : conversation.title,
+            lastParams: pending.params,
+            updatedAt: Math.max(conversation.updatedAt + 1, now)
+          })!;
+        })
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+    );
     try {
-      const task = await window.upscaler.startImageTask({
+      const task = await window.upscaler.startImageTask(params);
+      if (!task) {
+        setSubmitNote("生图参数无效，请检查提示词和模型。");
+        return;
+      }
+      submissionOrderRef.current[task.id] = order;
+      setTaskSubmissionOrders((current) => ({ ...current, [task.id]: order }));
+      onTaskStarted(task);
+      setConversations((current) =>
+        current
+          .map((conversation) => {
+            if (conversation.id !== conversationId) return conversation;
+            return normalizeImageConversation({
+              ...conversation,
+              taskIds: appendImageTaskIdInSubmissionOrder(conversation.taskIds, task.id, submissionOrderRef.current),
+              lastParams: { ...params, referencePaths: [...params.referencePaths] },
+              updatedAt: Math.max(conversation.updatedAt + 1, task.createdAt)
+            })!;
+          })
+          .sort((left, right) => right.updatedAt - left.updatedAt)
+      );
+    } catch (error) {
+      setSubmitNote(error instanceof Error ? error.message : "生图任务提交失败");
+    } finally {
+      setPendingSubmissions((current) => current.filter((submission) => submission.id !== pending.id));
+    }
+  }
+
+  async function generate() {
+    if (!canGenerate || !active) return;
+    await submitImageTask(
+      {
         model: model!.publicName,
         prompt: prompt.trim(),
         size: activeSize,
@@ -1998,11 +2234,15 @@ function ImageGenModule({
         fitMode,
         sizeMode: activeSizeMode,
         referencePaths: effectiveReferences
-      });
-      if (!task) setSubmitNote("生图参数无效，请检查提示词和模型。");
-    } catch (error) {
-      setSubmitNote(error instanceof Error ? error.message : "生图任务提交失败");
-    }
+      },
+      active.id,
+      true
+    );
+  }
+
+  async function rerunTask(params: ImageGenParams) {
+    if (!active) return;
+    await submitImageTask(params, active.id, false);
   }
 
   async function addReferences() {
@@ -2044,6 +2284,63 @@ function ImageGenModule({
     setTemplateTheme(theme);
   }
 
+  function patchActiveConversation(patch: Partial<ImageConversation>) {
+    if (!active) return;
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === active.id
+          ? normalizeImageConversation({ ...conversation, ...patch, updatedAt: Date.now() })!
+          : conversation
+      )
+    );
+  }
+
+  function renameActiveConversation(title: string) {
+    if (!active) return;
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === active.id
+          ? { ...conversation, title: title.slice(0, 80), renamed: true, updatedAt: Date.now() }
+          : conversation
+      )
+    );
+  }
+
+  function createConversation() {
+    const conversation = createImageConversation();
+    setConversations((current) => [conversation, ...current].slice(0, 80));
+    setActiveId(conversation.id);
+    setSubmitNote(null);
+  }
+
+  function selectConversation(id: string) {
+    setActiveId(id);
+    setSubmitNote(null);
+    setReferenceNote(null);
+  }
+
+  function deleteConversation(id: string) {
+    const next = conversations.filter((conversation) => conversation.id !== id);
+    if (next.length === 0) {
+      const conversation = createImageConversation();
+      setConversations([conversation]);
+      setActiveId(conversation.id);
+      return;
+    }
+    setConversations(next);
+    if (id === active?.id) setActiveId(next[0]!.id);
+  }
+
+  function clearFinishedInConversation() {
+    if (!active) return;
+    const nextTaskIds = active.taskIds.filter((id) => {
+      const task = tasksById.get(id);
+      return task?.status === "queued" || task?.status === "running";
+    });
+    if (nextTaskIds.length === active.taskIds.length) return;
+    patchActiveConversation({ taskIds: nextTaskIds });
+  }
+
   return (
     <>
       <div className="module-head">
@@ -2071,237 +2368,336 @@ function ImageGenModule({
           </button>
         </div>
       ) : (
-        <>
-          <div className="image-workbench">
-            <aside className="panel image-settings-rail">
-              <div className="image-rail-head">
-                <div className="segmented">
-                  <button className="on" type="button">
-                    生成
-                  </button>
-                  <button type="button" disabled={referenceLimit <= 0} onClick={() => void addReferences()}>
-                    编辑
-                  </button>
-                </div>
-                <span className="image-chip">RiverMoon 账户</span>
+        <section className="imagegen-shell">
+          <aside className="agent-history">
+            <div className="agent-history-head">
+              <div>
+                <h2>创作会话</h2>
+                <p>本机保存</p>
               </div>
+              <button
+                className="icon-button"
+                onClick={createConversation}
+                disabled={!conversationsReady}
+                title="新建会话"
+                aria-label="新建会话"
+              >
+                <Plus size={16} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="agent-history-list">
+              {conversationsReady ? (
+                conversations.map((conversation) => {
+                  const firstTask = tasksById.get(conversation.taskIds[0] ?? "");
+                  const previewPath = firstTask?.outputPaths[0];
+                  return (
+                    <button
+                      key={conversation.id}
+                      className={`agent-conversation image-conversation ${conversation.id === active?.id ? "on" : ""}`}
+                      onClick={() => selectConversation(conversation.id)}
+                    >
+                      {previewPath ? (
+                        <Thumb path={previewPath} max={96} className="image-conversation-thumb" />
+                      ) : (
+                        <span className="thumb image-conversation-thumb image-conversation-placeholder">
+                          <Images size={16} strokeWidth={1.7} aria-hidden="true" />
+                        </span>
+                      )}
+                      <span className="image-conversation-copy">
+                        <span className="agent-conversation-title" title={conversation.title}>
+                          {conversation.title || "新会话"}
+                        </span>
+                        <span className="agent-conversation-time">{formatShortTime(conversation.updatedAt)}</span>
+                      </span>
+                      <span className="count-badge">
+                        {conversation.taskIds.length + (pendingCountByConversation.get(conversation.id) ?? 0)}
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="empty">正在载入会话...</div>
+              )}
+            </div>
+          </aside>
 
-              <div className="image-control-grid">
-                <label className="image-model-field">
-                  模型
-                  <select value={model?.publicName ?? ""} onChange={(event) => setSelectedModel(event.target.value)}>
-                    {models.map((id) => (
-                      <option key={id.publicName} value={id.publicName}>
-                        {id.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  比例
-                  <select value={activeRatio} onChange={(event) => changeRatio(event.target.value)}>
-                    {ratios.map((item) => (
-                      <option key={item} value={item}>
-                        {IMAGE_RATIO_LABELS[item] ?? item}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  尺寸
-                  <select
-                    value={customEnabled ? "__custom" : activeSize}
-                    onChange={(event) => {
-                      if (event.target.value === "__custom") {
-                        setCustomEnabled(true);
-                        return;
-                      }
-                      setCustomEnabled(false);
-                      setSize(event.target.value);
-                    }}
-                  >
-                    {sizeOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {imageSizeLabel(item)}
-                      </option>
-                    ))}
-                    {model?.customSize.enabled ? <option value="__custom">自定义尺寸</option> : null}
-                  </select>
-                </label>
-                <label>
-                  质量
-                  <select value={activeQuality} onChange={(event) => setQuality(event.target.value as ImageQuality)}>
-                    {qualityOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {IMAGE_QUALITY_LABELS[item]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  格式
-                  <select
-                    value={activeFormat}
-                    onChange={(event) => setOutputFormat(event.target.value as ImageOutputFormat)}
-                  >
-                    {formatOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {IMAGE_FORMAT_LABELS[item]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  数量
-                  <select value={count} onChange={(event) => setCount(Number(event.target.value))}>
-                    {[1, 2, 3, 4].map((value) => (
-                      <option key={value} value={value}>
-                        {value} 张
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  适配
-                  <select value={fitMode} onChange={(event) => setFitMode(event.target.value as ImageFitMode)}>
-                    <option value="contain">完整留白</option>
-                    <option value="cover">居中裁切</option>
-                  </select>
-                </label>
-              </div>
-
-              {customEnabled ? (
-                <div className="custom-size-row">
-                  <label>
-                    宽度 px
-                    <input
-                      value={customWidth}
-                      onChange={(event) => setCustomWidth(event.target.value.replace(/[^\d]/g, "").slice(0, 5))}
-                    />
-                  </label>
-                  <label>
-                    高度 px
-                    <input
-                      value={customHeight}
-                      onChange={(event) => setCustomHeight(event.target.value.replace(/[^\d]/g, "").slice(0, 5))}
-                    />
-                  </label>
-                  <button
-                    className="secondary sm"
-                    onClick={() => {
-                      const width = customWidth;
-                      setCustomWidth(customHeight);
-                      setCustomHeight(width);
-                    }}
-                  >
-                    交换
-                  </button>
-                  {customError ? <span className="hint-warn">{customError}</span> : null}
-                </div>
-              ) : null}
-
-              <div className="image-option-row">
+          <div className="agent-main imagegen-main">
+            <div className="agent-toolbar imagegen-toolbar">
+              <div className="agent-title-group">
+                <input
+                  value={active?.title ?? ""}
+                  onChange={(event) => renameActiveConversation(event.target.value)}
+                  aria-label="会话标题"
+                  disabled={!active}
+                />
                 <button
-                  className={`toggle-pill ${activeSizeMode === "native" ? "on" : ""}`}
-                  disabled={!sizeModeOptions.includes("native")}
-                  onClick={() => setSizeMode(activeSizeMode === "native" ? "postprocess" : "native")}
-                  type="button"
+                  className="icon-button"
+                  onClick={() => active && deleteConversation(active.id)}
+                  disabled={!active}
+                  title="删除会话"
+                  aria-label="删除会话"
                 >
-                  原生直出 <span>{activeSizeMode === "native" ? "开" : "关"}</span>
+                  <Trash2 size={15} strokeWidth={1.8} aria-hidden="true" />
                 </button>
-                <button className="secondary sm" disabled={referenceLimit <= 0} onClick={() => void addReferences()}>
-                  添加参考图
-                </button>
-                {referencePaths.length > 0 ? (
-                  <button className="link-button" onClick={() => setReferencePaths([])}>
-                    清空
+              </div>
+              <div className="imagegen-toolbar-meta">
+                <span className="count-badge">{(active?.taskIds.length ?? 0) + activePendingSubmissions.length}</span>
+                {active &&
+                (active.taskIds.length !== activeTasks.length ||
+                  activeTasks.some((task) => task.status !== "queued" && task.status !== "running")) ? (
+                  <button className="link-button" onClick={clearFinishedInConversation}>
+                    清空已结束
                   </button>
                 ) : null}
-                <span className="field-note">
-                  {referenceLimit > 0 ? `${referencePaths.length}/${referenceLimit} 张` : "当前模型不支持参考图"}
-                </span>
               </div>
+            </div>
 
-              {referencePaths.length > 0 ? (
-                <div className="image-reference-list">
-                  {referencePaths.map((item, index) => (
-                    <div className="video-reference-item" key={item}>
-                      <span>@图{index + 1}</span>
-                      <span className="reference-name">{basename(item)}</span>
-                      <button
-                        className="icon-mini"
-                        aria-label="移除参考图"
-                        onClick={() => setReferencePaths((current) => current.filter((path) => path !== item))}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
+            <div className="imagegen-feed">
+              <ImageTaskList
+                tasks={activeTasks}
+                pendingSubmissions={activePendingSubmissions}
+                submissionOrders={taskSubmissionOrders}
+                now={now}
+                onUpscale={onUpscale}
+                onRerun={rerunTask}
+              />
+            </div>
+
+            <div className="imagegen-composer">
+              <div className="imagegen-parameters image-settings-rail">
+                <div className="image-rail-head">
+                  <div className="segmented">
+                    <button className="on" type="button">
+                      生成
+                    </button>
+                    <button type="button" disabled={referenceLimit <= 0} onClick={() => void addReferences()}>
+                      编辑
+                    </button>
+                  </div>
+                  <span className="image-chip">RiverMoon 账户</span>
                 </div>
-              ) : null}
-              {referenceNote ? <p className="hint-warn">{referenceNote}</p> : null}
 
-              <div className="storyboard-section">
-                <span className="field-label">分镜模板</span>
-                <input
-                  value={templateTheme}
-                  placeholder="输入主题"
-                  onChange={(event) => setTemplateTheme(event.target.value)}
-                />
-                <div className="story-template-actions">
-                  {STORYBOARD_TEMPLATES.map((template) => (
+                <div className="image-control-grid">
+                  <label className="image-model-field">
+                    模型
+                    <select value={model?.publicName ?? ""} onChange={(event) => setSelectedModel(event.target.value)}>
+                      {models.map((id) => (
+                        <option key={id.publicName} value={id.publicName}>
+                          {id.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    比例
+                    <select value={activeRatio} onChange={(event) => changeRatio(event.target.value)}>
+                      {ratios.map((item) => (
+                        <option key={item} value={item}>
+                          {IMAGE_RATIO_LABELS[item] ?? item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    尺寸
+                    <select
+                      value={customEnabled ? "__custom" : activeSize}
+                      onChange={(event) => {
+                        if (event.target.value === "__custom") {
+                          setCustomEnabled(true);
+                          return;
+                        }
+                        setCustomEnabled(false);
+                        setSize(event.target.value);
+                      }}
+                    >
+                      {sizeOptions.map((item) => (
+                        <option key={item} value={item}>
+                          {imageSizeLabel(item)}
+                        </option>
+                      ))}
+                      {model?.customSize.enabled ? <option value="__custom">自定义尺寸</option> : null}
+                    </select>
+                  </label>
+                  <label>
+                    质量
+                    <select value={activeQuality} onChange={(event) => setQuality(event.target.value as ImageQuality)}>
+                      {qualityOptions.map((item) => (
+                        <option key={item} value={item}>
+                          {IMAGE_QUALITY_LABELS[item]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    格式
+                    <select
+                      value={activeFormat}
+                      onChange={(event) => setOutputFormat(event.target.value as ImageOutputFormat)}
+                    >
+                      {formatOptions.map((item) => (
+                        <option key={item} value={item}>
+                          {IMAGE_FORMAT_LABELS[item]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    数量
+                    <select value={count} onChange={(event) => setCount(Number(event.target.value))}>
+                      {[1, 2, 3, 4].map((value) => (
+                        <option key={value} value={value}>
+                          {value} 张
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    适配
+                    <select value={fitMode} onChange={(event) => setFitMode(event.target.value as ImageFitMode)}>
+                      <option value="contain">完整留白</option>
+                      <option value="cover">居中裁切</option>
+                    </select>
+                  </label>
+                </div>
+
+                {customEnabled ? (
+                  <div className="custom-size-row">
+                    <label>
+                      宽度 px
+                      <input
+                        value={customWidth}
+                        onChange={(event) => setCustomWidth(event.target.value.replace(/[^\d]/g, "").slice(0, 5))}
+                      />
+                    </label>
+                    <label>
+                      高度 px
+                      <input
+                        value={customHeight}
+                        onChange={(event) => setCustomHeight(event.target.value.replace(/[^\d]/g, "").slice(0, 5))}
+                      />
+                    </label>
                     <button
                       className="secondary sm"
-                      key={template.id}
-                      type="button"
-                      title={template.mode}
-                      onClick={() => applyTemplate(template)}
+                      onClick={() => {
+                        const width = customWidth;
+                        setCustomWidth(customHeight);
+                        setCustomHeight(width);
+                      }}
                     >
-                      {template.label}
+                      交换
                     </button>
-                  ))}
-                </div>
-              </div>
-              {model?.notice ? <p className="field-note">{model.notice}</p> : null}
-            </aside>
+                    {customError ? <span className="hint-warn">{customError}</span> : null}
+                  </div>
+                ) : null}
 
-            <section className="panel image-creation-stage">
-              <div className="image-stage-head">
-                <div>
-                  <h2>{effectiveReferences.length > 0 ? "参考图编辑" : "创建图片"}</h2>
-                  <p>
-                    {model?.label ?? "图片模型"} · {activeSize.replace("x", "×")}
-                  </p>
+                <div className="image-option-row">
+                  <button
+                    className={`toggle-pill ${activeSizeMode === "native" ? "on" : ""}`}
+                    disabled={!sizeModeOptions.includes("native")}
+                    onClick={() => setSizeMode(activeSizeMode === "native" ? "postprocess" : "native")}
+                    type="button"
+                  >
+                    原生直出 <span>{activeSizeMode === "native" ? "开" : "关"}</span>
+                  </button>
+                  <button className="secondary sm" disabled={referenceLimit <= 0} onClick={() => void addReferences()}>
+                    添加参考图
+                  </button>
+                  {referencePaths.length > 0 ? (
+                    <button className="link-button" onClick={() => setReferencePaths([])}>
+                      清空
+                    </button>
+                  ) : null}
+                  <span className="field-note">
+                    {referenceLimit > 0 ? `${referencePaths.length}/${referenceLimit} 张` : "当前模型不支持参考图"}
+                  </span>
                 </div>
-                <span className="image-stage-badge">
-                  {IMAGE_QUALITY_LABELS[activeQuality]} · {IMAGE_FORMAT_LABELS[activeFormat]}
-                </span>
-              </div>
-              <textarea
-                className="image-stage-prompt"
-                rows={12}
-                placeholder="描述画面、主体、构图、光线与风格。使用多张参考图时，可以在提示词中写 @图1、@图2。"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-              />
-              <div className="image-submit-bar">
-                <div className="image-submit-status">
-                  {submitBlockReason ? (
-                    <span className="submit-block-reason">{submitBlockReason}</span>
-                  ) : (
-                    <span>准备生成 {count} 张图片</span>
-                  )}
-                  {submitNote ? <span className="submit-block-reason">{submitNote}</span> : null}
+
+                {referencePaths.length > 0 ? (
+                  <div className="image-reference-list">
+                    {referencePaths.map((item, index) => (
+                      <div className="video-reference-item" key={item}>
+                        <span>@图{index + 1}</span>
+                        <span className="reference-name">{basename(item)}</span>
+                        <button
+                          className="icon-mini"
+                          aria-label="移除参考图"
+                          onClick={() => setReferencePaths((current) => current.filter((path) => path !== item))}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {referenceNote ? <p className="hint-warn">{referenceNote}</p> : null}
+
+                <div className="storyboard-section">
+                  <span className="field-label">分镜模板</span>
+                  <input
+                    value={templateTheme}
+                    placeholder="输入主题"
+                    onChange={(event) => setTemplateTheme(event.target.value)}
+                  />
+                  <div className="story-template-actions">
+                    {STORYBOARD_TEMPLATES.map((template) => (
+                      <button
+                        className="secondary sm"
+                        key={template.id}
+                        type="button"
+                        title={template.mode}
+                        onClick={() => applyTemplate(template)}
+                      >
+                        {template.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <button className="primary gen-btn" disabled={!canGenerate} onClick={() => void generate()}>
-                  生成 {count > 1 ? `${count} 张` : "图片"}
-                </button>
+                {model?.notice ? <p className="field-note">{model.notice}</p> : null}
               </div>
-            </section>
+
+              <div className="imagegen-prompt-area">
+                <div className="image-stage-head">
+                  <div>
+                    <h2>{effectiveReferences.length > 0 ? "参考图编辑" : "创建图片"}</h2>
+                    <p>
+                      {model?.label ?? "图片模型"} · {activeSize.replace("x", "×")}
+                    </p>
+                  </div>
+                  <span className="image-stage-badge">
+                    {IMAGE_QUALITY_LABELS[activeQuality]} · {IMAGE_FORMAT_LABELS[activeFormat]}
+                  </span>
+                </div>
+                <textarea
+                  ref={promptRef}
+                  className="image-stage-prompt"
+                  rows={4}
+                  placeholder="描述画面、主体、构图、光线与风格。使用多张参考图时，可以在提示词中写 @图1、@图2。"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                    event.preventDefault();
+                    void generate();
+                  }}
+                />
+                <div className="image-submit-bar">
+                  <div className="image-submit-status">
+                    {submitBlockReason ? (
+                      <span className="submit-block-reason">{submitBlockReason}</span>
+                    ) : (
+                      <span>准备生成 {count} 张图片</span>
+                    )}
+                    {submitNote ? <span className="submit-block-reason">{submitNote}</span> : null}
+                  </div>
+                  <button className="primary gen-btn" disabled={!canGenerate} onClick={() => void generate()}>
+                    生成 {count > 1 ? `${count} 张` : "图片"}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-
-          <ImageTaskList tasks={tasks} now={now} onUpscale={onUpscale} />
-        </>
+        </section>
       )}
     </>
   );
@@ -2309,47 +2705,69 @@ function ImageGenModule({
 
 function ImageTaskList({
   tasks,
+  pendingSubmissions,
+  submissionOrders,
   now,
-  onUpscale
+  onUpscale,
+  onRerun
 }: {
   tasks: ImageGenTask[];
+  pendingSubmissions: PendingImageSubmission[];
+  submissionOrders: Readonly<Record<string, number>>;
   now: number;
   onUpscale: (path: string) => void;
+  onRerun: (params: ImageGenParams) => void;
 }) {
-  const hasFinished = tasks.some((task) => task.status !== "running" && task.status !== "queued");
+  if (tasks.length === 0 && pendingSubmissions.length === 0) {
+    return <div className="empty imagegen-empty">描述画面开始创作</div>;
+  }
+  const timeline = mergeImageTaskTimeline(tasks, pendingSubmissions, submissionOrders);
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>
-          生成记录 <span className="count-badge">{tasks.length}</span>
-        </h2>
-        {hasFinished ? (
-          <button className="link-button" onClick={() => void window.upscaler.clearFinishedImageTasks()}>
-            清空已结束
-          </button>
-        ) : null}
-      </div>
-      {tasks.length === 0 ? (
-        <div className="empty">还没有生成记录，写一段提示词试试。</div>
-      ) : (
-        <div className="job-list">
-          {tasks.map((task) => (
-            <ImageTaskCard key={task.id} task={task} now={now} onUpscale={onUpscale} />
-          ))}
-        </div>
+    <div className="job-list imagegen-task-list">
+      {timeline.map((item) =>
+        item.kind === "pending" ? (
+          <PendingImageTaskCard key={item.id} submission={item.submission} />
+        ) : (
+          <ImageTaskCard key={item.id} task={item.task} now={now} onUpscale={onUpscale} onRerun={onRerun} />
+        )
       )}
-    </section>
+    </div>
+  );
+}
+
+function PendingImageTaskCard({ submission }: { submission: PendingImageSubmission }) {
+  const { params } = submission;
+  const promptPreview = params.prompt.length > 64 ? `${params.prompt.slice(0, 64)}…` : params.prompt;
+  return (
+    <article className="job queued">
+      <div className="job-head">
+        <div className="job-title">
+          <h3>{promptPreview}</h3>
+          <p>
+            {params.model} · {params.size.replace("x", "×")} · {params.quality.toUpperCase()} ·{" "}
+            {IMAGE_FORMAT_LABELS[params.outputFormat]} · {params.count} 张
+            {params.referencePaths.length > 0 ? ` · 参考图 ${params.referencePaths.length}` : ""} · 正在提交
+          </p>
+        </div>
+        <span className="pill queued">提交中</span>
+      </div>
+      <div className="progress indeterminate" role="progressbar" aria-label="正在提交生图任务">
+        <div />
+      </div>
+    </article>
   );
 }
 
 function ImageTaskCard({
   task,
   now,
-  onUpscale
+  onUpscale,
+  onRerun
 }: {
   task: ImageGenTask;
   now: number;
   onUpscale: (path: string) => void;
+  onRerun: (params: ImageGenParams) => void;
 }) {
   const active = task.status === "running" || task.status === "queued";
   const promptPreview = task.params.prompt.length > 64 ? `${task.params.prompt.slice(0, 64)}…` : task.params.prompt;
@@ -2402,7 +2820,7 @@ function ImageTaskCard({
                 去充值
               </button>
             ) : null}
-            <button className="secondary sm" onClick={() => void window.upscaler.startImageTask(task.params)}>
+            <button className="secondary sm" onClick={() => onRerun(task.params)}>
               重试
             </button>
           </div>
@@ -2421,7 +2839,7 @@ function ImageTaskCard({
           </button>
         ) : null}
         {task.status === "succeeded" ? (
-          <button className="secondary sm" onClick={() => void window.upscaler.startImageTask(task.params)}>
+          <button className="secondary sm" onClick={() => onRerun(task.params)}>
             再来一张
           </button>
         ) : null}

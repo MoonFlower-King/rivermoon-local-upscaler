@@ -1393,7 +1393,15 @@ input[type="range"] {
 
 .gen-output-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+.gen-output-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .job-error-actions {
@@ -1801,6 +1809,7 @@ input[type="range"] {
 }
 
 .imagegen-shell {
+  position: relative;
   height: calc(100vh - 112px);
   min-height: 480px;
   display: grid;
@@ -1810,6 +1819,21 @@ input[type="range"] {
   background: var(--surface-card);
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-1);
+}
+
+.imagegen-toast {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  max-width: min(320px, calc(100% - 24px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--text-1);
+  background: var(--surface-thick);
+  border: 1px solid var(--separator-strong);
+  box-shadow: var(--shadow-2);
+  font-size: 12px;
 }
 
 .image-conversation {

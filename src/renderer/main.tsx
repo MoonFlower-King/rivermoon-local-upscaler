@@ -6,6 +6,7 @@ import {
   ImageUp,
   Images,
   MessageSquareText,
+  PencilLine,
   Plus,
   Settings as SettingsIcon,
   Trash2,
@@ -53,6 +54,13 @@ import {
   saveImageConversations,
   type ImageConversation
 } from "./image-conversations";
+import {
+  MAX_IMAGE_EDIT_REFERENCES,
+  REDACTED_IMAGE_REFERENCE_PATH,
+  addImageEditReference,
+  imageModelSupportsEditing,
+  resolveImageRerunReferences
+} from "./image-edit-state";
 import { appendImageTaskIdInSubmissionOrder, mergeImageTaskTimeline } from "./image-task-timeline";
 import { videoTaskDiagnosticText } from "./video-diagnostics";
 import { pruneVideoReferenceTypeMap, resolveRendererVideoReferenceTypes } from "./video-reference-types";
@@ -1985,10 +1993,12 @@ function ImageGenModule({
   const [referenceNote, setReferenceNote] = useState<string | null>(null);
   const [templateTheme, setTemplateTheme] = useState("");
   const [submitNote, setSubmitNote] = useState<string | null>(null);
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
   const [pendingSubmissions, setPendingSubmissions] = useState<PendingImageSubmission[]>([]);
   const [taskSubmissionOrders, setTaskSubmissionOrders] = useState<Record<string, number>>({});
   const [appliedParamsKey, setAppliedParamsKey] = useState("");
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
   const submissionOrderRef = useRef<Record<string, number>>({});
   const submissionCounterRef = useRef(0);
 
@@ -2019,6 +2029,12 @@ function ImageGenModule({
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current != null) window.clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!tasksLoaded || conversationsReady) return;
@@ -2079,8 +2095,11 @@ function ImageGenModule({
   const activeFormat = formatOptions.includes(outputFormat) ? outputFormat : formatOptions[0]!;
   const sizeModeOptions = model?.sizeModes.length ? model.sizeModes : (["postprocess"] as ImageSizeMode[]);
   const activeSizeMode = sizeModeOptions.includes(sizeMode) ? sizeMode : sizeModeOptions[0]!;
-  const referenceLimit = model?.maxReferences ?? 0;
+  const referenceLimit = imageModelSupportsEditing(model)
+    ? Math.min(MAX_IMAGE_EDIT_REFERENCES, model!.maxReferences)
+    : 0;
   const effectiveReferences = referencePaths.slice(0, referenceLimit);
+  const editingImage = effectiveReferences.length > 0;
   const customError = customEnabled && model ? validateRendererCustomSize(model, customWidth, customHeight) : null;
   const modelSignature = `${contract?.contractVersion ?? ""}:${models.map((item) => item.publicName).join("|")}`;
   const paramsApplyKey = active ? `${active.id}:${modelSignature}` : "";
@@ -2106,7 +2125,7 @@ function ImageGenModule({
         setCustomEnabled(Boolean(targetModel?.customSize.enabled && !targetModel.sizes.includes(params.size)));
         setCustomWidth(String(parsedSize?.width ?? 1024));
         setCustomHeight(String(parsedSize?.height ?? 1024));
-        setReferencePaths(params.referencePaths.filter((path) => path !== "[已上传参考图]"));
+        setReferencePaths(params.referencePaths.filter((path) => path !== REDACTED_IMAGE_REFERENCE_PATH));
       } else {
         const targetModel = selectImageModel(models, "", contract?.defaultModelId);
         const defaultRatios = imageRatiosForModel(targetModel);
@@ -2242,7 +2261,22 @@ function ImageGenModule({
 
   async function rerunTask(params: ImageGenParams) {
     if (!active) return;
-    await submitImageTask(params, active.id, false);
+    let rerunParams = params;
+    if (params.referencePaths.includes(REDACTED_IMAGE_REFERENCE_PATH)) {
+      const rerunModel = models.find((item) => item.publicName === params.model || item.internalName === params.model);
+      const rerunLimit = imageModelSupportsEditing(rerunModel)
+        ? Math.min(MAX_IMAGE_EDIT_REFERENCES, rerunModel!.maxReferences)
+        : 0;
+      const restoredReferences = resolveImageRerunReferences(params.referencePaths, referencePaths, rerunLimit);
+      if (!restoredReferences) {
+        setSubmitNote("原参考图未保存在任务记录中，请先重新添加参考图后再试。");
+        promptRef.current?.focus();
+        return;
+      }
+      if (rerunModel && rerunModel.publicName !== model?.publicName) setSelectedModel(rerunModel.publicName);
+      rerunParams = { ...params, referencePaths: restoredReferences };
+    }
+    await submitImageTask(rerunParams, active.id, false);
   }
 
   async function addReferences() {
@@ -2263,6 +2297,41 @@ function ImageGenModule({
     if (referencePaths.length + selection.paths.length > referenceLimit) {
       setReferenceNote(`已保留前 ${referenceLimit} 张参考图，超过当前模型上限的素材未加入。`);
     }
+  }
+
+  function showImageNotice(message: string) {
+    if (noticeTimerRef.current != null) window.clearTimeout(noticeTimerRef.current);
+    setImageNotice(message);
+    noticeTimerRef.current = window.setTimeout(() => {
+      setImageNotice(null);
+      noticeTimerRef.current = null;
+    }, 2600);
+  }
+
+  function editOutputImage(outputPath: string) {
+    const editModel = imageModelSupportsEditing(model) ? model : models.find(imageModelSupportsEditing);
+    if (!editModel) {
+      showImageNotice("当前 Key 没有支持参考图编辑的模型。");
+      return;
+    }
+    if (editModel.publicName !== model?.publicName) setSelectedModel(editModel.publicName);
+    const editLimit = Math.min(MAX_IMAGE_EDIT_REFERENCES, editModel.maxReferences);
+    const update = addImageEditReference(referencePaths, outputPath, editLimit);
+    setReferencePaths(update.referencePaths);
+    setReferenceNote(null);
+    if (update.replacedFirst) {
+      showImageNotice(
+        editLimit === MAX_IMAGE_EDIT_REFERENCES
+          ? "参考图已满 20 张，已替换第 1 张。"
+          : `当前模型最多支持 ${editLimit} 张参考图，已替换第 1 张。`
+      );
+    }
+    window.setTimeout(() => {
+      const input = promptRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
   }
 
   function changeRatio(nextRatio: string) {
@@ -2369,6 +2438,11 @@ function ImageGenModule({
         </div>
       ) : (
         <section className="imagegen-shell">
+          {imageNotice ? (
+            <div className="imagegen-toast" role="status">
+              {imageNotice}
+            </div>
+          ) : null}
           <aside className="agent-history">
             <div className="agent-history-head">
               <div>
@@ -2460,6 +2534,7 @@ function ImageGenModule({
                 now={now}
                 onUpscale={onUpscale}
                 onRerun={rerunTask}
+                onEditImage={editOutputImage}
               />
             </div>
 
@@ -2467,10 +2542,22 @@ function ImageGenModule({
               <div className="imagegen-parameters image-settings-rail">
                 <div className="image-rail-head">
                   <div className="segmented">
-                    <button className="on" type="button">
+                    <button
+                      className={editingImage ? "" : "on"}
+                      type="button"
+                      onClick={() => {
+                        setReferencePaths([]);
+                        setReferenceNote(null);
+                      }}
+                    >
                       生成
                     </button>
-                    <button type="button" disabled={referenceLimit <= 0} onClick={() => void addReferences()}>
+                    <button
+                      className={editingImage ? "on" : ""}
+                      type="button"
+                      disabled={referenceLimit <= 0}
+                      onClick={() => void addReferences()}
+                    >
                       编辑
                     </button>
                   </div>
@@ -2709,7 +2796,8 @@ function ImageTaskList({
   submissionOrders,
   now,
   onUpscale,
-  onRerun
+  onRerun,
+  onEditImage
 }: {
   tasks: ImageGenTask[];
   pendingSubmissions: PendingImageSubmission[];
@@ -2717,6 +2805,7 @@ function ImageTaskList({
   now: number;
   onUpscale: (path: string) => void;
   onRerun: (params: ImageGenParams) => void;
+  onEditImage: (path: string) => void;
 }) {
   if (tasks.length === 0 && pendingSubmissions.length === 0) {
     return <div className="empty imagegen-empty">描述画面开始创作</div>;
@@ -2728,7 +2817,14 @@ function ImageTaskList({
         item.kind === "pending" ? (
           <PendingImageTaskCard key={item.id} submission={item.submission} />
         ) : (
-          <ImageTaskCard key={item.id} task={item.task} now={now} onUpscale={onUpscale} onRerun={onRerun} />
+          <ImageTaskCard
+            key={item.id}
+            task={item.task}
+            now={now}
+            onUpscale={onUpscale}
+            onRerun={onRerun}
+            onEditImage={onEditImage}
+          />
         )
       )}
     </div>
@@ -2762,12 +2858,14 @@ function ImageTaskCard({
   task,
   now,
   onUpscale,
-  onRerun
+  onRerun,
+  onEditImage
 }: {
   task: ImageGenTask;
   now: number;
   onUpscale: (path: string) => void;
   onRerun: (params: ImageGenParams) => void;
+  onEditImage: (path: string) => void;
 }) {
   const active = task.status === "running" || task.status === "queued";
   const promptPreview = task.params.prompt.length > 64 ? `${task.params.prompt.slice(0, 64)}…` : task.params.prompt;
@@ -2799,6 +2897,10 @@ function ImageTaskCard({
             <div key={outputPath} className="gen-output">
               <Thumb path={outputPath} max={320} className="thumb-gen" />
               <div className="gen-output-actions">
+                <button className="secondary sm" onClick={() => onEditImage(outputPath)}>
+                  <PencilLine size={13} strokeWidth={1.8} aria-hidden="true" />
+                  编辑此图
+                </button>
                 <button className="secondary sm" onClick={() => onUpscale(outputPath)}>
                   超分到 4K
                 </button>

@@ -144,6 +144,7 @@ const requiredAsarFiles = [
   asarPath("dist", "main", "cloud", "video-queue.js"),
   asarPath("dist", "main", "cloud", "video-url.js"),
   asarPath("dist", "main", "model-downloader.js"),
+  asarPath("dist", "main", "model-registry.js"),
   asarPath("dist", "main", "update-checker.js"),
   asarPath("dist", "preload", "index.js"),
   asarPath("dist", "renderer", "index.html")
@@ -168,6 +169,7 @@ if (failures.length === 0) {
   const videoQueueJs = extractAsarText(asarPath("dist", "main", "cloud", "video-queue.js"));
   const videoUrlJs = extractAsarText(asarPath("dist", "main", "cloud", "video-url.js"));
   const modelDownloaderJs = extractAsarText(asarPath("dist", "main", "model-downloader.js"));
+  const modelRegistryJs = extractAsarText(asarPath("dist", "main", "model-registry.js"));
   const updateCheckerJs = extractAsarText(asarPath("dist", "main", "update-checker.js"));
   const rendererBundle = rendererJs ? extractAsarText(rendererJs) : "";
 
@@ -257,7 +259,8 @@ if (failures.length === 0) {
     "提交视频任务必须使用 HTTPS 实时合同"
   ]);
   checkContains("video queue", videoQueueJs, ["video-tasks.json", "safePersistentVideoUrl"]);
-  checkContains("model downloader", modelDownloaderJs, ["4x-UltraSharp.pth", "SHA256"]);
+  checkContains("model downloader", modelDownloaderJs, ["SHA256"]);
+  checkContains("model registry", modelRegistryJs, ["4x-UltraSharp.pth", "RealESRGAN_x4plus.pth"]);
   checkContains("update checker", updateCheckerJs, [
     "api.github.com/repos",
     "releases/latest",

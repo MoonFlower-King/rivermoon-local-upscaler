@@ -301,6 +301,12 @@ function App() {
     );
   }
 
+  // 生图模块注册的拖图接收器（命令式通道：事件回调里 setState，规避 effect 内 setState）。
+  const imageDropHandler = useRef<((paths: string[]) => void) | null>(null);
+  const registerImageDropHandler = useCallback((handler: ((paths: string[]) => void) | null) => {
+    imageDropHandler.current = handler;
+  }, []);
+
   // 拖拽计数：dragleave 在进入子元素时也会触发，必须配对计数才能避免高亮闪烁。
   function handleDragEnter(event: React.DragEvent) {
     event.preventDefault();
@@ -322,9 +328,17 @@ function App() {
       .filter((filePath): filePath is string => Boolean(filePath));
     if (paths.length === 0) return;
     const files = await window.upscaler.discoverFiles(paths);
-    addPending(files);
-    // 在任何模块拖入图片都视为想要超分，自动切过去。
-    selectModule("upscale");
+    if (files.length === 0) return;
+    // 按当前模块分流：生图模块拖入 = 加为参考图（走编辑链路）；
+    // 超分/资产库拖入 = 进超分待处理；其他模块不劫持导航。
+    if (module === "imagegen") {
+      imageDropHandler.current?.(files);
+      return;
+    }
+    if (module === "upscale" || module === "assets") {
+      addPending(files);
+      selectModule("upscale");
+    }
   }
 
   const counts = useMemo(() => {
@@ -528,6 +542,7 @@ function App() {
             onUpscale={upscaleImage}
             onTaskStarted={registerImageTask}
             onRefreshContract={() => void window.upscaler.getImageContract().then(setImageContract)}
+            registerDropHandler={registerImageDropHandler}
           />
         </section>
         {module === "videogen" ? (
@@ -1961,7 +1976,8 @@ function ImageGenModule({
   onGoSettings,
   onUpscale,
   onTaskStarted,
-  onRefreshContract
+  onRefreshContract,
+  registerDropHandler
 }: {
   account: AccountStatus | null;
   contract: ImageContract | null;
@@ -1972,6 +1988,7 @@ function ImageGenModule({
   onUpscale: (path: string) => void;
   onTaskStarted: (task: ImageGenTask) => void;
   onRefreshContract: () => void;
+  registerDropHandler: (handler: ((paths: string[]) => void) | null) => void;
 }) {
   const models = useMemo(() => resolveImageModels(contract, account?.models ?? []), [account, contract]);
   const storageExistsRef = useRef(window.localStorage.getItem(IMAGE_CONV_KEY) !== null);
@@ -1996,6 +2013,15 @@ function ImageGenModule({
   const [referencePaths, setReferencePaths] = useState<string[]>([]);
   const [referenceNote, setReferenceNote] = useState<string | null>(null);
   const [templateTheme, setTemplateTheme] = useState("");
+
+  // 接收 App 层分流来的拖入图片：直接加为参考图（referencePaths 非空即走编辑链路）。
+  useEffect(() => {
+    registerDropHandler((paths) => {
+      setReferencePaths((current) => [...new Set([...current, ...paths])].slice(0, 20));
+      setReferenceNote("已把拖入图片加为参考图。");
+    });
+    return () => registerDropHandler(null);
+  }, [registerDropHandler]);
   const [submitNote, setSubmitNote] = useState<string | null>(null);
   const [imageNotice, setImageNotice] = useState<string | null>(null);
   const [pendingSubmissions, setPendingSubmissions] = useState<PendingImageSubmission[]>([]);

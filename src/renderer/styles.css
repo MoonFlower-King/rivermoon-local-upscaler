@@ -1819,7 +1819,7 @@ input[type="range"] {
   height: calc(100vh - 112px);
   min-height: 480px;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   overflow: hidden;
   border-radius: 16px;
   background: var(--surface-card);
@@ -1843,15 +1843,16 @@ input[type="range"] {
 }
 
 .image-conversation {
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  padding: 8px 10px;
 }
 
 .image-conversation-thumb {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
 }
 
 .image-conversation-placeholder {
@@ -1880,6 +1881,24 @@ input[type="range"] {
 
 .imagegen-main {
   grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+/* 会话标题内联化：常态像标题文本，悬停/聚焦才显出可编辑。 */
+.imagegen-toolbar .agent-title-group input {
+  background: transparent;
+  border-color: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  padding-left: 2px;
+}
+
+.imagegen-toolbar .agent-title-group input:hover {
+  border-color: var(--separator);
+}
+
+.imagegen-toolbar .agent-title-group input:focus {
+  background: var(--field-bg);
+  border-color: var(--accent);
 }
 
 .imagegen-toolbar-meta {

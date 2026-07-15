@@ -2013,6 +2013,7 @@ function ImageGenModule({
   const [referencePaths, setReferencePaths] = useState<string[]>([]);
   const [referenceNote, setReferenceNote] = useState<string | null>(null);
   const [templateTheme, setTemplateTheme] = useState("");
+  const [showStoryboard, setShowStoryboard] = useState(false);
 
   // 接收 App 层分流来的拖入图片：直接加为参考图（referencePaths 非空即走编辑链路）。
   useEffect(() => {
@@ -2725,6 +2726,13 @@ function ImageGenModule({
                   >
                     原生直出 <span>{activeSizeMode === "native" ? "开" : "关"}</span>
                   </button>
+                  <button
+                    className={`toggle-pill ${showStoryboard ? "on" : ""}`}
+                    onClick={() => setShowStoryboard((current) => !current)}
+                    type="button"
+                  >
+                    分镜模板
+                  </button>
                   <button className="secondary sm" disabled={referenceLimit <= 0} onClick={() => void addReferences()}>
                     添加参考图
                   </button>
@@ -2757,42 +2765,33 @@ function ImageGenModule({
                 ) : null}
                 {referenceNote ? <p className="hint-warn">{referenceNote}</p> : null}
 
-                <div className="storyboard-section">
-                  <span className="field-label">分镜模板</span>
-                  <input
-                    value={templateTheme}
-                    placeholder="输入主题"
-                    onChange={(event) => setTemplateTheme(event.target.value)}
-                  />
-                  <div className="story-template-actions">
-                    {STORYBOARD_TEMPLATES.map((template) => (
-                      <button
-                        className="secondary sm"
-                        key={template.id}
-                        type="button"
-                        title={template.mode}
-                        onClick={() => applyTemplate(template)}
-                      >
-                        {template.label}
-                      </button>
-                    ))}
+                {showStoryboard ? (
+                  <div className="storyboard-section">
+                    <span className="field-label">分镜模板</span>
+                    <input
+                      value={templateTheme}
+                      placeholder="输入主题"
+                      onChange={(event) => setTemplateTheme(event.target.value)}
+                    />
+                    <div className="story-template-actions">
+                      {STORYBOARD_TEMPLATES.map((template) => (
+                        <button
+                          className="secondary sm"
+                          key={template.id}
+                          type="button"
+                          title={template.mode}
+                          onClick={() => applyTemplate(template)}
+                        >
+                          {template.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : null}
                 {model?.notice ? <p className="field-note">{model.notice}</p> : null}
               </div>
 
               <div className="imagegen-prompt-area">
-                <div className="image-stage-head">
-                  <div>
-                    <h2>{effectiveReferences.length > 0 ? "参考图编辑" : "创建图片"}</h2>
-                    <p>
-                      {model?.label ?? "图片模型"} · {activeSize.replace("x", "×")}
-                    </p>
-                  </div>
-                  <span className="image-stage-badge">
-                    {IMAGE_QUALITY_LABELS[activeQuality]} · {IMAGE_FORMAT_LABELS[activeFormat]}
-                  </span>
-                </div>
                 <textarea
                   ref={promptRef}
                   className="image-stage-prompt"

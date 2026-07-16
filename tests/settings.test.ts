@@ -15,11 +15,11 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings({ outputFormat: "jpg" }).outputFormat).toBe("png");
   });
 
-  it("所有非 AI 超分 processingMode 都归一为默认 AI 超分", () => {
-    expect(sanitizeSettings({ processingMode: "remoteAi" } as unknown).processingMode).toBe("aiUpscale");
+  it("三种处理模式合法保留，非法值归一为默认组合模式", () => {
+    expect(sanitizeSettings({ processingMode: "remoteAi" } as unknown).processingMode).toBe("aiUpscaleWebClear");
     expect(sanitizeSettings({ processingMode: "aiUpscale" }).processingMode).toBe("aiUpscale");
-    expect(sanitizeSettings({ processingMode: "aiUpscaleWebClear" }).processingMode).toBe("aiUpscale");
-    expect(sanitizeSettings({ processingMode: "webClear" }).processingMode).toBe("aiUpscale");
+    expect(sanitizeSettings({ processingMode: "aiUpscaleWebClear" }).processingMode).toBe("aiUpscaleWebClear");
+    expect(sanitizeSettings({ processingMode: "webClear" }).processingMode).toBe("webClear");
   });
 
   it("maxSide <=0 视为不限制(0)，否则夹到 [256, 16384]", () => {
@@ -39,7 +39,7 @@ describe("sanitizeSettings", () => {
   it("忽略已废弃的多余字段，只保留当前设置项", () => {
     const result = sanitizeSettings({ outputFormat: "png", model: "x", scale: 2, engineMode: "y" } as unknown);
     expect(result).toEqual({
-      processingMode: "aiUpscale",
+      processingMode: "aiUpscaleWebClear",
       outputFormat: "png",
       outputDirectory: null,
       maxSide: 4096,

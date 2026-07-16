@@ -66,7 +66,7 @@ describe("normalizeJob", () => {
     expect(job?.status).toBe("succeeded");
     expect(job?.durationMs).toBe(20);
     expect(job?.settings).toEqual({
-      processingMode: "aiUpscale",
+      processingMode: "aiUpscaleWebClear",
       outputFormat: "png",
       outputDirectory: null,
       maxSide: 4096,

@@ -6,7 +6,8 @@ export const DEFAULT_MODEL = DEFAULT_UPSCALE_MODEL;
 export const DEFAULT_SCALE = 4;
 
 export const DEFAULT_SETTINGS: UpscaleSettings = {
-  processingMode: "aiUpscale",
+  // 默认 = 网站同款观感：AI 超分后再过一道网页增强（锐化+微调色）。
+  processingMode: "aiUpscaleWebClear",
   outputFormat: "png",
   outputDirectory: null,
   maxSide: 4096,
@@ -28,7 +29,9 @@ export function sanitizeSettings(input: unknown): UpscaleSettings {
 }
 
 function normalizeProcessingMode(value: unknown): ProcessingMode {
-  if (value === "aiUpscale") return value;
+  // 三种模式全部放行：网站按钮的真实链路是「AI 超分 + 网页增强」组合，
+  // 纯超分只重建细节不加锐化，观感远弱于网页版。
+  if (value === "aiUpscale" || value === "webClear" || value === "aiUpscaleWebClear") return value;
   return DEFAULT_SETTINGS.processingMode;
 }
 

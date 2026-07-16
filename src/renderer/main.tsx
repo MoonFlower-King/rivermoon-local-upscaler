@@ -757,6 +757,45 @@ function SettingsPanel({
         )
       ) : null}
 
+      <div className="field">
+        <span className="field-label">处理模式</span>
+        <div className="radio-group">
+          <label className="radio-row">
+            <input
+              type="radio"
+              name="processing-mode"
+              checked={settings.processingMode === "aiUpscaleWebClear"}
+              onChange={() => onChange({ ...settings, processingMode: "aiUpscaleWebClear" })}
+            />
+            <span>
+              网站同款<small>AI 超分 + 网页增强（锐化提亮），与网页版按钮一致</small>
+            </span>
+          </label>
+          <label className="radio-row">
+            <input
+              type="radio"
+              name="processing-mode"
+              checked={settings.processingMode === "aiUpscale"}
+              onChange={() => onChange({ ...settings, processingMode: "aiUpscale" })}
+            />
+            <span>
+              纯 AI 超分<small>只重建细节不加锐化，色彩保持原图</small>
+            </span>
+          </label>
+          <label className="radio-row">
+            <input
+              type="radio"
+              name="processing-mode"
+              checked={settings.processingMode === "webClear"}
+              onChange={() => onChange({ ...settings, processingMode: "webClear" })}
+            />
+            <span>
+              仅网页增强<small>不跑 AI 模型，秒级完成，适合轻度提清晰</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
       {modelStatus && modelStatus.models.length > 1 ? (
         <div className="field">
           <span className="field-label">超分模型</span>

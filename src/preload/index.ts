@@ -35,6 +35,7 @@ const api = {
   startJobs: (payload: unknown) => ipcRenderer.invoke("jobs:start", payload),
   listJobs: () => ipcRenderer.invoke("jobs:list"),
   cancelJob: (id: string) => ipcRenderer.invoke("jobs:cancel", id),
+  removeJob: (id: string) => ipcRenderer.invoke("jobs:remove", id),
   clearFinished: () => ipcRenderer.invoke("jobs:clear-finished"),
   reveal: (filePath: string) => ipcRenderer.invoke("shell:reveal", filePath),
   getPreview: (filePath: string, maxSide?: number, quality?: number) =>

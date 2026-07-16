@@ -4011,6 +4011,15 @@ function JobCard({
             </button>
           </>
         ) : null}
+        {!active ? (
+          <button
+            className="secondary sm job-delete"
+            title="删除这条记录（不会删除已输出的图片文件）"
+            onClick={() => void window.upscaler.removeJob(job.id)}
+          >
+            删除
+          </button>
+        ) : null}
       </div>
     </article>
   );

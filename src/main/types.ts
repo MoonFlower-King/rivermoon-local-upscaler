@@ -425,6 +425,7 @@ export interface UpscalerApi {
   startJobs(payload: StartJobsPayload): Promise<UpscaleJob[]>;
   listJobs(): Promise<UpscaleJob[]>;
   cancelJob(id: string): Promise<UpscaleJob | null>;
+  removeJob(id: string): Promise<void>;
   clearFinished(): Promise<void>;
   reveal(filePath: string): Promise<void>;
   getPreview(filePath: string, maxSide?: number, quality?: number): Promise<string | null>;

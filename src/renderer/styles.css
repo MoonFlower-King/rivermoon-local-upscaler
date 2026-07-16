@@ -943,6 +943,16 @@ input[type="range"] {
   display: none;
 }
 
+/* 删除按钮靠右独立成组，悬浮时提示破坏性 */
+.job-actions .job-delete {
+  margin-left: auto;
+}
+
+.job-actions .job-delete:hover {
+  background: var(--red-bg);
+  color: var(--red-text);
+}
+
 .empty {
   padding: 22px;
   color: var(--text-3);

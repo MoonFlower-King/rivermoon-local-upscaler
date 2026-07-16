@@ -91,6 +91,19 @@ export class JobQueue {
     this.emitNow();
   }
 
+  /** 删除单条任务记录（不动输出文件）。运行中的任务先取消再删，避免残留孤儿 AbortController。 */
+  removeJob(id: string): void {
+    const job = this.jobs.get(id);
+    if (!job) return;
+    if (job.status === "running") {
+      this.cancelJob(id);
+      return;
+    }
+    this.queue = this.queue.filter((queuedId) => queuedId !== id);
+    this.jobs.delete(id);
+    this.emitNow();
+  }
+
   private async drain(): Promise<void> {
     if (this.running) return;
     this.running = true;

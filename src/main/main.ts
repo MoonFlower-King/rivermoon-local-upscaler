@@ -437,6 +437,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("jobs:list", () => jobQueue.getJobs());
   ipcMain.handle("jobs:cancel", (_event, id: string) => jobQueue.cancelJob(id));
+  ipcMain.handle("jobs:remove", (_event, id: string) => jobQueue.removeJob(id));
   ipcMain.handle("jobs:clear-finished", () => jobQueue.clearFinished());
 
   ipcMain.handle("shell:reveal", async (_event, filePath: unknown) => {

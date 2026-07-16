@@ -195,3 +195,11 @@
 - 2026-07-08 M9 GitHub 发布准备：新增 `scripts/create-github-release-assets.mjs` 和
   `scripts/release-github-preflight.mjs`，接入 `release:github:*` npm 命令；GitHub Release 采用 multipart 7z 分卷，
   避免单个 asset 超过 2GiB。
+- 2026-07-16 超分「差很多」深查（决定性证据）：桌面「网页增强」输出与网站 image-fast-enhance(4k_clear)
+  服务端管线在同图上**逐像素 0 差异**（37.7M 字节比对，脚本见会话记录）——管线复刻无误。
+  用户感知差距的真实来源：网站另有 `/v1/images/ai-enhance`（外部 ComfyUI worker、10min 超时、真 AI），
+  worker 的 workflow/模型未确认（server.js 750 权限，需用户授权 SSH 读取）；测试图为失焦人像，
+  锐化类增强救不回失焦，疑似 web 端做了人脸修复（GFPGAN/CodeFormer 类）。桌面若要对齐需确认 worker 配置后接入等效模型。
+  证据图：`C:\Users\28692\Desktop\超分对比-100%细节.png`（四联 100% 裁块）。
+- 2026-07-16 任务记录逐条删除：JobQueue.removeJob + jobs:remove IPC + 任务卡「删除」按钮（终态可删、
+  运行中先取消、不动输出文件）。227 tests 通过。

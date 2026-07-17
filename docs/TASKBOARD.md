@@ -203,3 +203,10 @@
   证据图：`C:\Users\28692\Desktop\超分对比-100%细节.png`（四联 100% 裁块）。
 - 2026-07-16 任务记录逐条删除：JobQueue.removeJob + jobs:remove IPC + 任务卡「删除」按钮（终态可删、
   运行中先取消、不动输出文件）。227 tests 通过。
+- 2026-07-16 M12 网站 ComfyUI 工作流复刻（决定性收尾）：ai-enhance worker 就在本机 D:/ComfyUI，
+  核心 = 自定义节点 CodexSmartEnhance（ComfyUI_CodexRouter）：GPT 分类 → 照片走 SUPIR
+  （SUPIR-v0Q_fp16 + sd_xl_base_1.0，steps15/cfg4/control0.9/restoration1.0/Wavelet/
+  RestoreDPMPP2MSampler/fp8+tiled，scale1.5，seed12345）→ 动漫/文字走 RealESRGAN。
+  桌面新增 processingMode=aiRepair 1:1 复刻（buildSupirPrompt，keep_model_loaded=false 为唯一
+  运维性差异）；supirResources() 探测门控 UI；尺寸上限 1.5x。commit 3da80c6。
+  存档工作流：D:/ComfyUI/Codex_AI_Smart_Enhancer_Workflow.json。

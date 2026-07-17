@@ -6,8 +6,8 @@ export const DEFAULT_MODEL = DEFAULT_UPSCALE_MODEL;
 export const DEFAULT_SCALE = 4;
 
 export const DEFAULT_SETTINGS: UpscaleSettings = {
-  // 默认 = 网站同款观感：AI 超分后再过一道网页增强（锐化+微调色）。
-  processingMode: "aiUpscaleWebClear",
+  // 网站 AI 按钮的生产 worker 默认直接执行 4x-UltraSharp ComfyUI 工作流。
+  processingMode: "aiUpscale",
   outputFormat: "png",
   outputDirectory: null,
   maxSide: 4096,
@@ -29,9 +29,9 @@ export function sanitizeSettings(input: unknown): UpscaleSettings {
 }
 
 function normalizeProcessingMode(value: unknown): ProcessingMode {
-  // 三种模式全部放行：网站按钮的真实链路是「AI 超分 + 网页增强」组合，
-  // 纯超分只重建细节不加锐化，观感远弱于网页版。
-  if (value === "aiUpscale" || value === "webClear" || value === "aiUpscaleWebClear") return value;
+  // aiRepair = 网站「AI 增强」的 SUPIR 扩散修复链路（需本机 SUPIR 环境，任务启动时校验）。
+  if (value === "aiUpscale" || value === "webClear" || value === "aiUpscaleWebClear" || value === "aiRepair")
+    return value;
   return DEFAULT_SETTINGS.processingMode;
 }
 

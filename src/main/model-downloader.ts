@@ -3,7 +3,13 @@ import { app } from "electron";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { comfyUpscaleModelsRoot, extraModelPathsConfig, findComfyModel, userModelsRoot } from "./paths.js";
+import {
+  comfyUpscaleModelsRoot,
+  extraModelPathsConfig,
+  findComfyModel,
+  supirResources,
+  userModelsRoot
+} from "./paths.js";
 import {
   UPSCALE_MODEL_REGISTRY,
   findModelSpec,
@@ -49,6 +55,7 @@ export function getModelStatus(): UpscaleModelStatus {
     models,
     selectedFileName,
     selectedInstalled: models.some((model) => model.fileName === selectedFileName && model.installed),
+    supirAvailable: supirResources().available,
     download: state
   };
 }

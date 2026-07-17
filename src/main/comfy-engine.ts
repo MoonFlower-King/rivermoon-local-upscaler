@@ -11,7 +11,8 @@ import {
   comfyPythonPath,
   comfyRuntimeRoot,
   extraModelPathsConfig,
-  findComfyModel
+  findComfyModel,
+  supirResources
 } from "./paths.js";
 import { log, logsRoot } from "./logger.js";
 import { DEFAULT_MODEL } from "./settings.js";
@@ -20,6 +21,7 @@ import {
   NODE,
   assertHistoryHealthy,
   buildStandardPrompt,
+  buildSupirPrompt,
   progressBaseForNode,
   progressFromState,
   progressSpanForNode,
@@ -107,8 +109,13 @@ export async function interruptComfy(): Promise<void> {
 }
 
 export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
+  const isRepair = options.settings.processingMode === "aiRepair";
   const modelName = options.settings.upscaleModel || DEFAULT_MODEL;
-  assertQualityResources(modelName);
+  if (isRepair) {
+    assertSupirResources();
+  } else {
+    assertQualityResources(modelName);
+  }
 
   const comfyUrl = await ensureComfyReady(options.signal);
   activeComfyUrl = comfyUrl;
@@ -119,13 +126,16 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
   const copiedInputPath = path.join(comfyInputRoot(), inputName);
   try {
     const prefix = `rivermoon_ai_${jobId}`;
-    const prompt = buildStandardPrompt(inputName, modelName, options.targetDimensions, prefix);
+    // SUPIR 的缩放走节点内 scale_by（lanczos），倍数从目标/输入尺寸比值还原，精度对齐节点 0.01 步长。
+    const prompt = isRepair
+      ? buildSupirPrompt(inputName, supirScaleBy(options.inputDimensions, options.targetDimensions), prefix)
+      : buildStandardPrompt(inputName, modelName, options.targetDimensions, prefix);
     const clientId = `rivermoon-desktop-${crypto.randomUUID()}`;
 
     options.onProgress?.(12);
     const promptId = await submitPrompt(comfyUrl, prompt, clientId, options.signal);
     activePromptId = promptId;
-    log(`ComfyUI 任务已提交 prompt=${promptId} model=${modelName}`);
+    log(`ComfyUI 任务已提交 prompt=${promptId} ${isRepair ? "workflow=SUPIR" : `model=${modelName}`}`);
 
     const history = await waitForPrompt(comfyUrl, promptId, clientId, options.signal, options.onProgress);
     const comfyOutput = findSavedImage(history);
@@ -504,6 +514,22 @@ function assertQualityResources(modelName: string): void {
   if (!findComfyModel(modelName)) {
     throw new Error(`缺少超分模型 ${modelName}。请在「图片超分」页下载该模型后重试。`);
   }
+}
+
+function assertSupirResources(): void {
+  const status = supirResources();
+  if (!status.available) {
+    throw new Error(
+      `「AI 智能修复」需要本机 ComfyUI 的 SUPIR 环境，缺少：${status.missing.join("、")}` +
+        `（检测目录 ${comfyRuntimeRoot()}）。`
+    );
+  }
+}
+
+/** 从队列算好的目标尺寸还原 SUPIR scale_by（节点步长 0.01），不小于 1。 */
+function supirScaleBy(input: ImageDimensions, target: ImageDimensions): number {
+  const ratio = Math.max(target.width / input.width, target.height / input.height);
+  return Math.max(1, Math.round(ratio * 100) / 100);
 }
 
 function delay(ms: number): Promise<void> {

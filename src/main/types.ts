@@ -3,7 +3,7 @@ export type ConcreteImageFormat = Exclude<ImageFormat, "auto">;
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
-export type ProcessingMode = "webClear" | "aiUpscale" | "aiUpscaleWebClear";
+export type ProcessingMode = "webClear" | "aiUpscale" | "aiUpscaleWebClear" | "aiRepair";
 
 /** 资源状态卡片用的质量档位标识（当前固定 standard = 网站同款 AI）。 */
 export type QualityMode = "standard";
@@ -365,6 +365,8 @@ export type UpscaleModelStatus = {
   /** 当前设置选用的模型（settings.upscaleModel 规整后）。 */
   selectedFileName: string;
   selectedInstalled: boolean;
+  /** SUPIR 智能修复链路可用（本机 ComfyUI 带 SUPIR 节点 + 双模型）。 */
+  supirAvailable: boolean;
   download: ModelDownloadState;
 };
 

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import {
+  computeSupirDimensions,
   computeTargetDimensions,
   computeWorkerOutputDimensions,
   computeWebClearDimensions,
@@ -15,6 +16,7 @@ import {
 } from "./image.js";
 import { buildOutputPath } from "./output-path.js";
 import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
+import { SUPIR_DEFAULTS } from "./comfy-protocol.js";
 import { runWebClearEngine } from "./web-clear-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
@@ -333,11 +335,12 @@ function elapsedDuration(job: UpscaleJob): number {
 function processingMessage(mode: UpscaleSettings["processingMode"]): string {
   if (mode === "webClear") return "正在套用网页同款增强";
   if (mode === "aiUpscaleWebClear") return "正在用 AI 引擎放大";
+  if (mode === "aiRepair") return "正在用 SUPIR 智能修复（单张数分钟）";
   return "正在用 AI 引擎处理";
 }
 
 function resolveJobOutputFormat(settings: UpscaleSettings, hasAlpha: boolean): ConcreteImageFormat {
-  if (settings.processingMode === "aiUpscale") return "png";
+  if (settings.processingMode === "aiUpscale" || settings.processingMode === "aiRepair") return "png";
   return resolveConcreteFormat(settings.outputFormat, hasAlpha);
 }
 
@@ -349,6 +352,8 @@ async function computeJobTargetDimensions(
   if (settings.processingMode === "aiUpscale")
     return computeWorkerOutputDimensions(inputPath, settings.maxSide || 4096);
   if (settings.processingMode === "webClear") return computeWebClearDimensions(dimensions, settings.maxSide);
+  if (settings.processingMode === "aiRepair")
+    return computeSupirDimensions(dimensions, settings.maxSide, SUPIR_DEFAULTS.maxScale);
   return computeTargetDimensions(dimensions, settings.maxSide, DEFAULT_SCALE);
 }
 

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   ComfyExecutionError,
   NODE,
+  SUPIR_DEFAULTS,
   assertHistoryHealthy,
   buildStandardPromptTemplate,
+  buildSupirPrompt,
   describeStandardWorkflow,
   extractExecutionMessage,
   progressFromState
@@ -90,5 +92,40 @@ describe("describeStandardWorkflow", () => {
       [NODE.SCALE]: { inputs: { width: "<target_width>", height: "<target_height>", upscale_method: "lanczos" } },
       [NODE.SAVE]: { inputs: { filename_prefix: "<output_prefix>" } }
     });
+  });
+});
+
+describe("buildSupirPrompt", () => {
+  it("SUPIR 参数与网站 CodexSmartEnhance medium 档逐项一致", () => {
+    const prompt = buildSupirPrompt("in.png", 1.5, "prefix") as Record<
+      string,
+      { class_type: string; inputs: Record<string, unknown> }
+    >;
+    expect(prompt[NODE.LOAD]).toMatchObject({ class_type: "LoadImage", inputs: { image: "in.png" } });
+    expect(prompt[NODE.SAVE]).toMatchObject({ class_type: "SaveImage", inputs: { filename_prefix: "prefix" } });
+    expect(prompt[NODE.UPSCALE].class_type).toBe("SUPIR_Upscale");
+    expect(prompt[NODE.UPSCALE].inputs).toMatchObject({
+      supir_model: SUPIR_DEFAULTS.supirModel,
+      sdxl_model: SUPIR_DEFAULTS.sdxlModel,
+      scale_by: 1.5,
+      steps: 15,
+      cfg_scale: 4.0,
+      control_scale: 0.9,
+      restoration_scale: 1.0,
+      s_churn: 5,
+      s_noise: 1.003,
+      color_fix_type: "Wavelet",
+      resize_method: "lanczos",
+      use_tiled_vae: true,
+      use_tiled_sampling: true,
+      fp8_unet: true,
+      fp8_vae: true,
+      sampler: "RestoreDPMPP2MSampler"
+    });
+  });
+
+  it("SUPIR 节点复用 NODE.UPSCALE id，进度映射无需改动", () => {
+    const prompt = buildSupirPrompt("in.png", 1.12, "p");
+    expect(Object.keys(prompt).sort()).toEqual([NODE.LOAD, NODE.UPSCALE, NODE.SAVE].sort());
   });
 });

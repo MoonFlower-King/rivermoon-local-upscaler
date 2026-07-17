@@ -63,6 +63,24 @@ export function findComfyModel(modelName = "4x-UltraSharp.pth"): string | null {
   return null;
 }
 
+/** SUPIR 修复链路的本机资源检查：ComfyUI-SUPIR 节点 + SUPIR/SDXL 双模型。 */
+export function supirResources(): { available: boolean; missing: string[] } {
+  const root = comfyRuntimeRoot();
+  const checks = [
+    { label: "ComfyUI-SUPIR 节点", target: path.join(root, "custom_nodes", "ComfyUI-SUPIR") },
+    {
+      label: "SUPIR-v0Q_fp16.safetensors",
+      target: path.join(root, "models", "checkpoints", "SUPIR-v0Q_fp16.safetensors")
+    },
+    {
+      label: "sd_xl_base_1.0.safetensors",
+      target: path.join(root, "models", "checkpoints", "sd_xl_base_1.0.safetensors")
+    }
+  ];
+  const missing = checks.filter((check) => !fs.existsSync(check.target)).map((check) => check.label);
+  return { available: missing.length === 0, missing };
+}
+
 export function logsRoot(): string {
   const dir = path.join(app.getPath("userData"), "logs");
   fs.mkdirSync(dir, { recursive: true });

@@ -104,6 +104,20 @@ export async function computeWorkerOutputDimensions(filePath: string, maxSide: n
   };
 }
 
+/**
+ * SUPIR 修复的尺寸策略：网站智能增强固定 1.5x（maxScale），长边受 maxSide 约束；
+ * 原图已超上限时保持原尺寸纯修复（scale=1），绝不缩小。
+ */
+export function computeSupirDimensions(input: ImageDimensions, maxSide: number, maxScale: number): ImageDimensions {
+  const longest = Math.max(input.width, input.height);
+  const cap = Number.isFinite(maxSide) && maxSide > 0 ? maxSide / longest : maxScale;
+  const scale = Math.max(1, Math.min(maxScale, cap));
+  return {
+    width: Math.max(1, Math.round(input.width * scale)),
+    height: Math.max(1, Math.round(input.height * scale))
+  };
+}
+
 /** 复刻网站 image-fast-enhance 的 4k_clear 尺寸策略：长边尽量到 maxSide，但不缩小原图。 */
 export function computeWebClearDimensions(input: ImageDimensions, maxSide: number): ImageDimensions {
   const longest = Math.max(input.width, input.height);

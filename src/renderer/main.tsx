@@ -738,8 +738,8 @@ function SettingsPanel({
   const chainStatus = status?.qualityModes.standard;
   const selectedModel = modelStatus?.models.find((model) => model.fileName === settings.upscaleModel) ?? null;
   const chainCopy = {
-    title: selectedModel?.commercial ? "本地 AI 超分" : "网站同款 AI",
-    body: `${selectedModel?.displayName ?? "4x-UltraSharp"} · 默认 4096 长边 · PNG 输出`
+    title: selectedModel?.commercial ? "本地 AI 超分" : "网站 AI 高清修复",
+    body: `${selectedModel?.displayName ?? "4x-UltraSharp"} · ComfyUI 工作流 · 默认 4096 长边 · PNG 输出`
   };
 
   return (
@@ -768,7 +768,7 @@ function SettingsPanel({
               onChange={() => onChange({ ...settings, processingMode: "aiUpscaleWebClear" })}
             />
             <span>
-              网站同款<small>AI 超分 + 网页增强（锐化提亮），与网页版按钮一致</small>
+              AI 修复 + 网页增强<small>网站 AI 工作流完成后，再额外锐化和提亮</small>
             </span>
           </label>
           <label className="radio-row">
@@ -776,10 +776,27 @@ function SettingsPanel({
               type="radio"
               name="processing-mode"
               checked={settings.processingMode === "aiUpscale"}
-              onChange={() => onChange({ ...settings, processingMode: "aiUpscale" })}
+              onChange={() => onChange({ ...settings, processingMode: "aiUpscale", upscaleModel: "4x-UltraSharp.pth" })}
             />
             <span>
-              纯 AI 超分<small>只重建细节不加锐化，色彩保持原图</small>
+              网站 AI 高清修复<small>复刻网站 AI 按钮的 ComfyUI UltraSharp 工作流</small>
+            </span>
+          </label>
+          <label className="radio-row">
+            <input
+              type="radio"
+              name="processing-mode"
+              disabled={!modelStatus?.supirAvailable}
+              checked={settings.processingMode === "aiRepair"}
+              onChange={() => onChange({ ...settings, processingMode: "aiRepair" })}
+            />
+            <span>
+              SUPIR 智能修复
+              <small>
+                {modelStatus?.supirAvailable
+                  ? "网站「AI 增强」同款扩散修复，能救模糊/失焦，单张数分钟"
+                  : "需要本机 ComfyUI 带 SUPIR 节点与模型，当前未检测到"}
+              </small>
             </span>
           </label>
           <label className="radio-row">
@@ -813,7 +830,9 @@ function SettingsPanel({
                   {model.displayName}
                   <small>
                     {model.commercial ? "可商用" : "仅限非商业"} ·{" "}
-                    {model.installed ? model.tagline : "未下载（在左侧模型卡下载后可选）"}
+                    {model.installed
+                      ? `${model.tagline}${model.fileName === "4x-UltraSharp.pth" ? " · 网站 AI 按钮默认模型" : " · 会偏离网站 AI 效果"}`
+                      : "未下载（在左侧模型卡下载后可选）"}
                   </small>
                 </span>
               </label>
@@ -4562,8 +4581,9 @@ function formatUsd(value: number): string {
 
 function processingModeLabel(mode: ProcessingMode): string {
   if (mode === "webClear") return "网页增强";
-  if (mode === "aiUpscaleWebClear") return "AI+增强";
-  return "AI 超分";
+  if (mode === "aiUpscaleWebClear") return "AI 修复+增强";
+  if (mode === "aiRepair") return "SUPIR 智能修复";
+  return "网站 AI 修复";
 }
 
 function durationText(job: UpscaleJob, now: number): string {

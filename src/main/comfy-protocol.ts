@@ -135,6 +135,83 @@ export function describeStandardWorkflow(): string {
   ).join(" -> ");
 }
 
+/**
+ * 网站「AI 增强」链路的 SUPIR 扩散修复参数——逐项照抄生产 worker 的
+ * CodexSmartEnhance 节点（medium 档）与 Codex_AI_Smart_Enhancer_Workflow.json 存档值。
+ * 影响输出的参数不得改动；keep_model_loaded 是纯运维参数，
+ * 桌面版取 false 以便任务后释放显存（不影响画质）。
+ */
+export const SUPIR_DEFAULTS = {
+  supirModel: "SUPIR-v0Q_fp16.safetensors",
+  sdxlModel: "sd_xl_base_1.0.safetensors",
+  steps: 15,
+  cfgScale: 4.0,
+  controlScale: 0.9,
+  restorationScale: 1.0,
+  positivePrompt: "high quality, detailed",
+  negativePrompt: "bad quality, blurry, messy, noisy",
+  seed: 12345,
+  /** 网站智能增强的放大倍数上限（widget 存档 1.5；SUPIR 大于 2x 显存与幻觉都失控）。 */
+  maxScale: 1.5
+} as const;
+
+/** SUPIR 修复工作流：LoadImage -> SUPIR_Upscale -> SaveImage。节点 id 复用 NODE 常量，进度映射零改动。 */
+export function buildSupirPrompt(inputName: string, scaleBy: number, filenamePrefix: string): Record<string, unknown> {
+  return {
+    [NODE.LOAD]: {
+      class_type: "LoadImage",
+      inputs: { image: inputName }
+    },
+    [NODE.UPSCALE]: {
+      class_type: "SUPIR_Upscale",
+      inputs: {
+        supir_model: SUPIR_DEFAULTS.supirModel,
+        sdxl_model: SUPIR_DEFAULTS.sdxlModel,
+        image: [NODE.LOAD, 0],
+        seed: SUPIR_DEFAULTS.seed,
+        resize_method: "lanczos",
+        scale_by: scaleBy,
+        steps: SUPIR_DEFAULTS.steps,
+        restoration_scale: SUPIR_DEFAULTS.restorationScale,
+        cfg_scale: SUPIR_DEFAULTS.cfgScale,
+        a_prompt: SUPIR_DEFAULTS.positivePrompt,
+        n_prompt: SUPIR_DEFAULTS.negativePrompt,
+        s_churn: 5,
+        s_noise: 1.003,
+        control_scale: SUPIR_DEFAULTS.controlScale,
+        cfg_scale_start: 4.0,
+        control_scale_start: 0.0,
+        color_fix_type: "Wavelet",
+        keep_model_loaded: false,
+        use_tiled_vae: true,
+        encoder_tile_size_pixels: 512,
+        decoder_tile_size_latent: 64,
+        captions: "",
+        diffusion_dtype: "auto",
+        encoder_dtype: "auto",
+        batch_size: 1,
+        use_tiled_sampling: true,
+        sampler_tile_size: 1024,
+        sampler_tile_stride: 512,
+        fp8_unet: true,
+        fp8_vae: true,
+        sampler: "RestoreDPMPP2MSampler"
+      }
+    },
+    [NODE.SAVE]: {
+      class_type: "SaveImage",
+      inputs: {
+        images: [NODE.UPSCALE, 0],
+        filename_prefix: filenamePrefix
+      }
+    }
+  };
+}
+
+export function describeSupirWorkflow(): string {
+  return `LoadImage -> SUPIR_Upscale(${SUPIR_DEFAULTS.supirModel} + ${SUPIR_DEFAULTS.sdxlModel}, steps ${SUPIR_DEFAULTS.steps}, RestoreDPMPP2MSampler, Wavelet) -> SaveImage`;
+}
+
 export function buildStandardPromptTemplate(modelName: string): Record<string, unknown> {
   return {
     [NODE.LOAD]: {

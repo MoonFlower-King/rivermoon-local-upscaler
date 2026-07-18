@@ -44,6 +44,20 @@ export const UPSCALE_MODEL_REGISTRY: readonly UpscaleModelSpec[] = [
       "https://huggingface.co/lllyasviel/Annotators/resolve/main/RealESRGAN_x4plus.pth",
       "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
     ]
+  },
+  {
+    fileName: "RealESRGAN_x4plus_anime_6B.pth",
+    displayName: "RealESRGAN Anime6B",
+    sizeBytes: 17_938_799,
+    sha256: "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da",
+    license: "BSD 3-Clause（可商用）",
+    commercial: true,
+    tagline: "动漫/插画专用，线条干净，秒级出图",
+    urls: [
+      "https://hf-mirror.com/dtarnow/UPscaler/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
+      "https://huggingface.co/dtarnow/UPscaler/resolve/main/RealESRGAN_x4plus_anime_6B.pth",
+      "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth"
+    ]
   }
 ] as const;
 

@@ -30,6 +30,7 @@ describe("UPSCALE_MODEL_REGISTRY", () => {
 describe("normalizeUpscaleModel", () => {
   it("注册表内文件名原样通过，非法值回退默认", () => {
     expect(normalizeUpscaleModel("RealESRGAN_x4plus.pth")).toBe("RealESRGAN_x4plus.pth");
+    expect(normalizeUpscaleModel("RealESRGAN_x4plus_anime_6B.pth")).toBe("RealESRGAN_x4plus_anime_6B.pth");
     expect(normalizeUpscaleModel("evil.pth")).toBe(DEFAULT_UPSCALE_MODEL);
     expect(normalizeUpscaleModel(undefined)).toBe(DEFAULT_UPSCALE_MODEL);
     expect(normalizeUpscaleModel(42)).toBe(DEFAULT_UPSCALE_MODEL);

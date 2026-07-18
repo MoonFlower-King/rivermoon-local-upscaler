@@ -163,12 +163,21 @@ export const SUPIR_TIERS = {
 
 export type SupirTierName = keyof typeof SUPIR_TIERS;
 
+/** 智能模式下由 GPT 决策注入的 SUPIR 参数（提示词/控制强度），未提供时用 SUPIR_DEFAULTS。 */
+export type SupirPromptOverrides = {
+  positivePrompt?: string;
+  negativePrompt?: string;
+  controlScale?: number;
+  restorationScale?: number;
+};
+
 /** SUPIR 修复工作流：LoadImage -> SUPIR_Upscale -> SaveImage。节点 id 复用 NODE 常量，进度映射零改动。 */
 export function buildSupirPrompt(
   inputName: string,
   scaleBy: number,
   filenamePrefix: string,
-  tier: SupirTierName = "fast"
+  tier: SupirTierName = "fast",
+  overrides: SupirPromptOverrides = {}
 ): Record<string, unknown> {
   const tierParams = SUPIR_TIERS[tier] ?? SUPIR_TIERS.fast;
   return {
@@ -186,13 +195,13 @@ export function buildSupirPrompt(
         resize_method: "lanczos",
         scale_by: scaleBy,
         steps: tierParams.steps,
-        restoration_scale: SUPIR_DEFAULTS.restorationScale,
+        restoration_scale: overrides.restorationScale ?? SUPIR_DEFAULTS.restorationScale,
         cfg_scale: tierParams.cfgScale,
-        a_prompt: SUPIR_DEFAULTS.positivePrompt,
-        n_prompt: SUPIR_DEFAULTS.negativePrompt,
+        a_prompt: overrides.positivePrompt ?? SUPIR_DEFAULTS.positivePrompt,
+        n_prompt: overrides.negativePrompt ?? SUPIR_DEFAULTS.negativePrompt,
         s_churn: 5,
         s_noise: 1.003,
-        control_scale: SUPIR_DEFAULTS.controlScale,
+        control_scale: overrides.controlScale ?? SUPIR_DEFAULTS.controlScale,
         cfg_scale_start: 4.0,
         control_scale_start: 0.0,
         color_fix_type: "Wavelet",

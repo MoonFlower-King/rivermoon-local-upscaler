@@ -125,6 +125,19 @@ describe("buildSupirPrompt", () => {
     });
   });
 
+  it("智能模式 overrides 覆盖提示词与强度，未给的字段用默认", () => {
+    const prompt = buildSupirPrompt("in.png", 2, "p", "fast", {
+      positivePrompt: "sharp portrait",
+      controlScale: 0.75
+    }) as Record<string, { inputs: Record<string, unknown> }>;
+    expect(prompt[NODE.UPSCALE].inputs).toMatchObject({
+      a_prompt: "sharp portrait",
+      control_scale: 0.75,
+      n_prompt: SUPIR_DEFAULTS.negativePrompt,
+      restoration_scale: SUPIR_DEFAULTS.restorationScale
+    });
+  });
+
   it("quality 档 = 满意批次 CodexEnhanced_00008 配方（high 25 步 cfg5），tier 缺省走 fast", () => {
     const quality = buildSupirPrompt("in.png", 4, "p", "quality") as Record<
       string,

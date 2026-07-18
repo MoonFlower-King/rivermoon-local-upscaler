@@ -764,6 +764,17 @@ function SettingsPanel({
             <input
               type="radio"
               name="processing-mode"
+              checked={settings.processingMode === "aiAuto"}
+              onChange={() => onChange({ ...settings, processingMode: "aiAuto" })}
+            />
+            <span>
+              智能模式<small>GPT 看图自动分流：照片走 SUPIR、插画走 Anime6B、文字走通用（需已连接 Key）</small>
+            </span>
+          </label>
+          <label className="radio-row">
+            <input
+              type="radio"
+              name="processing-mode"
               checked={settings.processingMode === "aiUpscaleWebClear"}
               onChange={() => onChange({ ...settings, processingMode: "aiUpscaleWebClear" })}
             />
@@ -799,7 +810,7 @@ function SettingsPanel({
               </small>
             </span>
           </label>
-          {settings.processingMode === "aiRepair" ? (
+          {settings.processingMode === "aiRepair" || settings.processingMode === "aiAuto" ? (
             <div className="radio-group supir-tier-group">
               <label className="radio-row">
                 <input
@@ -4609,6 +4620,7 @@ function processingModeLabel(mode: ProcessingMode): string {
   if (mode === "webClear") return "网页增强";
   if (mode === "aiUpscaleWebClear") return "AI 修复+增强";
   if (mode === "aiRepair") return "SUPIR 智能修复";
+  if (mode === "aiAuto") return "智能模式";
   return "网站 AI 修复";
 }
 

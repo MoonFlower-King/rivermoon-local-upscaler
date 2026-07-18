@@ -3,7 +3,7 @@ export type ConcreteImageFormat = Exclude<ImageFormat, "auto">;
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
-export type ProcessingMode = "webClear" | "aiUpscale" | "aiUpscaleWebClear" | "aiRepair";
+export type ProcessingMode = "webClear" | "aiUpscale" | "aiUpscaleWebClear" | "aiRepair" | "aiAuto";
 
 /** SUPIR 修复强度：fast=medium×1.5（快速出图），quality=high×4（大图高清）。 */
 export type SupirTier = "fast" | "quality";

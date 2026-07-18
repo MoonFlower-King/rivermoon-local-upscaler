@@ -17,6 +17,8 @@ import {
 import { buildOutputPath } from "./output-path.js";
 import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
 import { SUPIR_TIERS } from "./comfy-protocol.js";
+import { SMART_ROUTE_MODELS, analyzeImageForRoute } from "./smart-route.js";
+import { supirResources } from "./paths.js";
 import { runWebClearEngine } from "./web-clear-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
@@ -167,6 +169,61 @@ export class JobQueue {
           format: outputFormat,
           signal: controller.signal
         });
+      } else if (job.settings.processingMode === "aiAuto") {
+        // 智能模式：复刻 CodexSmartEnhance——GPT 看图分流，SUPIR 缺环境时按节点原逻辑回退 ESRGAN。
+        this.updateJobProgress(job, 20);
+        const decision = await analyzeImageForRoute(job.inputPath, controller.signal);
+        if (controller.signal.aborted) throw new Error("任务已取消。");
+        log(
+          `智能模式判定 ${job.fileName} -> ${decision.recommendedPipeline}` +
+            `${decision.fallback ? "（未走GPT，回退）" : ""}｜${decision.reasoning.slice(0, 160)}`
+        );
+        if (decision.recommendedPipeline === "supir" && supirResources().available) {
+          job.message = "AI 判定：照片 → SUPIR 扩散修复";
+          job.targetDimensions = computeSupirDimensions(
+            dimensions,
+            job.settings.maxSide,
+            SUPIR_TIERS[job.settings.supirTier].maxScale
+          );
+          this.emit();
+          await runComfyEngine({
+            inputPath: job.inputPath,
+            outputPath,
+            settings: { ...job.settings, processingMode: "aiRepair" },
+            inputDimensions: dimensions,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal,
+            supirOverrides: {
+              positivePrompt: decision.positivePrompt,
+              negativePrompt: decision.negativePrompt,
+              controlScale: decision.controlScale,
+              restorationScale: decision.restorationScale
+            },
+            onProgress: (percent) => this.updateJobProgress(job, 22 + percent * 0.76)
+          });
+        } else {
+          const routedModel =
+            decision.recommendedPipeline === "realesrgan_anime"
+              ? SMART_ROUTE_MODELS.realesrgan_anime
+              : SMART_ROUTE_MODELS.realesrgan_general;
+          job.message =
+            decision.recommendedPipeline === "realesrgan_anime"
+              ? "AI 判定：插画 → Anime6B"
+              : "AI 判定：通用 → RealESRGAN";
+          job.targetDimensions = computeTargetDimensions(dimensions, job.settings.maxSide, DEFAULT_SCALE);
+          this.emit();
+          await runComfyEngine({
+            inputPath: job.inputPath,
+            outputPath,
+            settings: { ...job.settings, processingMode: "aiUpscale", upscaleModel: routedModel },
+            inputDimensions: dimensions,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal,
+            onProgress: (percent) => this.updateJobProgress(job, 22 + percent * 0.76)
+          });
+        }
       } else if (job.settings.processingMode === "aiUpscaleWebClear") {
         const intermediatePath = `${outputPath}.ai-tmp.${outputExtension(outputFormat)}`;
         try {
@@ -336,11 +393,13 @@ function processingMessage(mode: UpscaleSettings["processingMode"]): string {
   if (mode === "webClear") return "正在套用网页同款增强";
   if (mode === "aiUpscaleWebClear") return "正在用 AI 引擎放大";
   if (mode === "aiRepair") return "正在用 SUPIR 智能修复（单张数分钟）";
+  if (mode === "aiAuto") return "正在让 GPT 分析画面";
   return "正在用 AI 引擎处理";
 }
 
 function resolveJobOutputFormat(settings: UpscaleSettings, hasAlpha: boolean): ConcreteImageFormat {
-  if (settings.processingMode === "aiUpscale" || settings.processingMode === "aiRepair") return "png";
+  const mode = settings.processingMode;
+  if (mode === "aiUpscale" || mode === "aiRepair" || mode === "aiAuto") return "png";
   return resolveConcreteFormat(settings.outputFormat, hasAlpha);
 }
 

@@ -32,8 +32,15 @@ export function sanitizeSettings(input: unknown): UpscaleSettings {
 }
 
 function normalizeProcessingMode(value: unknown): ProcessingMode {
-  // aiRepair = 网站「AI 增强」的 SUPIR 扩散修复链路（需本机 SUPIR 环境，任务启动时校验）。
-  if (value === "aiUpscale" || value === "webClear" || value === "aiUpscaleWebClear" || value === "aiRepair")
+  // aiRepair = SUPIR 扩散修复链路（需本机 SUPIR 环境，任务启动时校验）；
+  // aiAuto = 智能模式：GPT 看图自动分流 SUPIR / Anime6B / 通用 ESRGAN（复刻 CodexSmartEnhance）。
+  if (
+    value === "aiUpscale" ||
+    value === "webClear" ||
+    value === "aiUpscaleWebClear" ||
+    value === "aiRepair" ||
+    value === "aiAuto"
+  )
     return value;
   return DEFAULT_SETTINGS.processingMode;
 }

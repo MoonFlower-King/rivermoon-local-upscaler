@@ -15,12 +15,13 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings({ outputFormat: "jpg" }).outputFormat).toBe("png");
   });
 
-  it("四种处理模式合法保留，非法值归一为网站 AI 模式", () => {
+  it("五种处理模式合法保留，非法值归一为网站 AI 模式", () => {
     expect(sanitizeSettings({ processingMode: "remoteAi" } as unknown).processingMode).toBe("aiUpscale");
     expect(sanitizeSettings({ processingMode: "aiUpscale" }).processingMode).toBe("aiUpscale");
     expect(sanitizeSettings({ processingMode: "aiUpscaleWebClear" }).processingMode).toBe("aiUpscaleWebClear");
     expect(sanitizeSettings({ processingMode: "webClear" }).processingMode).toBe("webClear");
     expect(sanitizeSettings({ processingMode: "aiRepair" }).processingMode).toBe("aiRepair");
+    expect(sanitizeSettings({ processingMode: "aiAuto" }).processingMode).toBe("aiAuto");
   });
 
   it("maxSide <=0 视为不限制(0)，否则夹到 [256, 16384]", () => {

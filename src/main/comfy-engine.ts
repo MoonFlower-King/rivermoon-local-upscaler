@@ -22,6 +22,7 @@ import {
   assertHistoryHealthy,
   buildStandardPrompt,
   buildSupirPrompt,
+  type SupirPromptOverrides,
   progressBaseForNode,
   progressFromState,
   progressSpanForNode,
@@ -51,6 +52,8 @@ export type ComfyRunOptions = {
   format: ConcreteImageFormat;
   signal: AbortSignal;
   onProgress?: (percent: number) => void;
+  /** 智能模式：GPT 决策注入的 SUPIR 提示词/强度（仅 aiRepair 工作流生效）。 */
+  supirOverrides?: SupirPromptOverrides;
 };
 
 let managedProcess: ChildProcess | null = null;
@@ -132,7 +135,8 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
           inputName,
           supirScaleBy(options.inputDimensions, options.targetDimensions),
           prefix,
-          options.settings.supirTier
+          options.settings.supirTier,
+          options.supirOverrides ?? {}
         )
       : buildStandardPrompt(inputName, modelName, options.targetDimensions, prefix);
     const clientId = `rivermoon-desktop-${crypto.randomUUID()}`;

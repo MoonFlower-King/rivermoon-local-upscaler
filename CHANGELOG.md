@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-18
+
 ### Added
 
 - AI 视频：HTTPS 能力合同、文生/图生/多参考图、任务恢复与本地下载。
@@ -39,5 +41,6 @@
 - 本地 ComfyUI/CUDA 图片超分、任务队列、真实进度、持久化和前后对比。
 - RiverMoon API Key、账户状态、AI 生图和资产库基础能力。
 
-[Unreleased]: https://github.com/MoonFlower-King/rivermoon-local-upscaler/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/MoonFlower-King/rivermoon-local-upscaler/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MoonFlower-King/rivermoon-local-upscaler/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MoonFlower-King/rivermoon-local-upscaler/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 {
   "name": "rivermoon-local-upscaler",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "连接 rivermoon7.com 的 AI 生图、视频、GPT 对话与本地超分桌面应用",
   "license": "MIT",

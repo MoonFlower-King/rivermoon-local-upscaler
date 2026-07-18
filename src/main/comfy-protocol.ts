@@ -146,15 +146,16 @@ export function describeStandardWorkflow(): string {
 export const SUPIR_DEFAULTS = {
   supirModel: "SUPIR-v0Q_fp16.safetensors",
   sdxlModel: "sd_xl_base_1.0.safetensors",
-  steps: 15,
-  cfgScale: 4.0,
+  // high 档（steps 25 / cfg 5.0）×4：对齐用户 2026-05-25 亲手跑出并认可的
+  // CodexEnhanced_00008/00010 成品的 PNG 元数据参数（enhancement_level=high, upscale_factor=4）。
+  steps: 25,
+  cfgScale: 5.0,
   controlScale: 0.9,
   restorationScale: 1.0,
   positivePrompt: "high quality, detailed",
   negativePrompt: "bad quality, blurry, messy, noisy",
   seed: 12345,
-  /** 网站智能增强的放大倍数上限（widget 存档 1.5；SUPIR 大于 2x 显存与幻觉都失控）。 */
-  maxScale: 1.5
+  maxScale: 4
 } as const;
 
 /** SUPIR 修复工作流：LoadImage -> SUPIR_Upscale -> SaveImage。节点 id 复用 NODE 常量，进度映射零改动。 */

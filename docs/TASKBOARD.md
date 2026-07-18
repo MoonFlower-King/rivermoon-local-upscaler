@@ -210,6 +210,13 @@
   桌面新增 processingMode=aiRepair 1:1 复刻（buildSupirPrompt，keep_model_loaded=false 为唯一
   运维性差异）；supirResources() 探测门控 UI；尺寸上限 1.5x。commit 3da80c6。
   存档工作流：D:/ComfyUI/Codex_AI_Smart_Enhancer_Workflow.json。
+- 2026-07-18 M13 满意批次考古与完整复刻：用户点名 CodexEnhanced_00006/00008（「做的快质量好」）。
+  PNG 元数据+视觉判定：00006=Anime6B ESRGAN（秒级、构图逐像素对位）、00008=SUPIR high×4（重绘）。
+  落地：① anime_6B 入模型注册表（ae0154e）；② SUPIR 双强度档 supirTier fast/quality + 模型驻留
+  keep_model_loaded=true（da41fed）；③ 智能模式 aiAuto 新按钮（182433d）——smart-route.ts 复刻
+  CodexSmartEnhance 的 GPT 分流（提示词逐字照抄），照片→SUPIR（动态提示词注入）、插画→Anime6B、
+  文字→通用，无 Key/失败/缺 SUPIR 按节点原逻辑回退。GPT 调用需真实 Key，待用户 GUI 验收。
+  ⚠️ 旧 CodexEnhanced PNG 元数据嵌明文 API key（3 把），已提醒用户作废。
 - 2026-07-16 M12 修正（用户 SSH 贴出 server.js 派发段 + 本机找到生产 worker 脚本
   C:/Users/28692/Documents/e/local-gpu-worker/rivermoon-local-gpu-worker.js）：
   **网站生产 ai-enhance 预设固定 ai_4x_ultrasharp（UltraSharp 工作流），SUPIR 是本机实验链路、

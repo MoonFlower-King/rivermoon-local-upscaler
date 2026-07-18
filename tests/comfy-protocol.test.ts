@@ -96,8 +96,8 @@ describe("describeStandardWorkflow", () => {
 });
 
 describe("buildSupirPrompt", () => {
-  it("SUPIR 参数与网站 CodexSmartEnhance medium 档逐项一致", () => {
-    const prompt = buildSupirPrompt("in.png", 1.5, "prefix") as Record<
+  it("fast 档 = 满意批次 CodexEnhanced_00006 配方（medium 15 步 cfg4）", () => {
+    const prompt = buildSupirPrompt("in.png", 1.5, "prefix", "fast") as Record<
       string,
       { class_type: string; inputs: Record<string, unknown> }
     >;
@@ -108,14 +108,15 @@ describe("buildSupirPrompt", () => {
       supir_model: SUPIR_DEFAULTS.supirModel,
       sdxl_model: SUPIR_DEFAULTS.sdxlModel,
       scale_by: 1.5,
-      steps: 25,
-      cfg_scale: 5.0,
+      steps: 15,
+      cfg_scale: 4.0,
       control_scale: 0.9,
       restoration_scale: 1.0,
       s_churn: 5,
       s_noise: 1.003,
       color_fix_type: "Wavelet",
       resize_method: "lanczos",
+      keep_model_loaded: true,
       use_tiled_vae: true,
       use_tiled_sampling: true,
       fp8_unet: true,
@@ -124,8 +125,14 @@ describe("buildSupirPrompt", () => {
     });
   });
 
-  it("SUPIR 节点复用 NODE.UPSCALE id，进度映射无需改动", () => {
-    const prompt = buildSupirPrompt("in.png", 1.12, "p");
-    expect(Object.keys(prompt).sort()).toEqual([NODE.LOAD, NODE.UPSCALE, NODE.SAVE].sort());
+  it("quality 档 = 满意批次 CodexEnhanced_00008 配方（high 25 步 cfg5），tier 缺省走 fast", () => {
+    const quality = buildSupirPrompt("in.png", 4, "p", "quality") as Record<
+      string,
+      { inputs: Record<string, unknown> }
+    >;
+    expect(quality[NODE.UPSCALE].inputs).toMatchObject({ steps: 25, cfg_scale: 5.0, scale_by: 4 });
+    const fallback = buildSupirPrompt("in.png", 1.12, "p") as Record<string, { inputs: Record<string, unknown> }>;
+    expect(fallback[NODE.UPSCALE].inputs).toMatchObject({ steps: 15, cfg_scale: 4.0 });
+    expect(Object.keys(fallback).sort()).toEqual([NODE.LOAD, NODE.UPSCALE, NODE.SAVE].sort());
   });
 });

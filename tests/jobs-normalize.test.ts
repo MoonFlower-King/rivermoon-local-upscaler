@@ -70,7 +70,8 @@ describe("normalizeJob", () => {
       outputFormat: "png",
       outputDirectory: null,
       maxSide: 4096,
-      upscaleModel: "4x-UltraSharp.pth"
+      upscaleModel: "4x-UltraSharp.pth",
+      supirTier: "fast"
     });
   });
 });

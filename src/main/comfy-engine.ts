@@ -128,7 +128,12 @@ export async function runComfyEngine(options: ComfyRunOptions): Promise<void> {
     const prefix = `rivermoon_ai_${jobId}`;
     // SUPIR 的缩放走节点内 scale_by（lanczos），倍数从目标/输入尺寸比值还原，精度对齐节点 0.01 步长。
     const prompt = isRepair
-      ? buildSupirPrompt(inputName, supirScaleBy(options.inputDimensions, options.targetDimensions), prefix)
+      ? buildSupirPrompt(
+          inputName,
+          supirScaleBy(options.inputDimensions, options.targetDimensions),
+          prefix,
+          options.settings.supirTier
+        )
       : buildStandardPrompt(inputName, modelName, options.targetDimensions, prefix);
     const clientId = `rivermoon-desktop-${crypto.randomUUID()}`;
 

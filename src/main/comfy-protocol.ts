@@ -136,30 +136,41 @@ export function describeStandardWorkflow(): string {
 }
 
 /**
- * SUPIR 扩散修复参数——逐项照抄本机 CodexSmartEnhance 节点（medium 档）与
- * Codex_AI_Smart_Enhancer_Workflow.json 存档值。注意：这是本机智能增强工作流；
- * 网站生产 ai-enhance 派发的是 ai_4x_ultrasharp 预设（= aiUpscale 模式的 UltraSharp 链），
- * 已经服务器 server.js 派发段核实（2026-07-16）。
- * 影响输出的参数不得改动；keep_model_loaded 是纯运维参数，
- * 桌面版取 false 以便任务后释放显存（不影响画质）。
+ * SUPIR 扩散修复参数——配方来源：用户 2026-05-24/25 亲手跑出并认可的
+ * CodexEnhanced 批次成品的 PNG 元数据（本机 CodexSmartEnhance 节点）。
+ * 注意：这是本机智能增强工作流；网站生产 ai-enhance 派发的是 ai_4x_ultrasharp
+ * 预设（= aiUpscale 模式的 UltraSharp 链），已经服务器 server.js 派发段核实（2026-07-16）。
+ * 影响输出的参数不得改动；keep_model_loaded=true 同满意批次，模型驻留显存，连跑不重载。
  */
 export const SUPIR_DEFAULTS = {
   supirModel: "SUPIR-v0Q_fp16.safetensors",
   sdxlModel: "sd_xl_base_1.0.safetensors",
-  // high 档（steps 25 / cfg 5.0）×4：对齐用户 2026-05-25 亲手跑出并认可的
-  // CodexEnhanced_00008/00010 成品的 PNG 元数据参数（enhancement_level=high, upscale_factor=4）。
-  steps: 25,
-  cfgScale: 5.0,
   controlScale: 0.9,
   restorationScale: 1.0,
   positivePrompt: "high quality, detailed",
   negativePrompt: "bad quality, blurry, messy, noisy",
-  seed: 12345,
-  maxScale: 4
+  seed: 12345
 } as const;
 
+/**
+ * 两个强度档：fast = CodexEnhanced_00006 配方（medium×1.5，快速出图），
+ * quality = CodexEnhanced_00008/00010 配方（high×4，大图高清）。
+ */
+export const SUPIR_TIERS = {
+  fast: { steps: 15, cfgScale: 4.0, maxScale: 1.5 },
+  quality: { steps: 25, cfgScale: 5.0, maxScale: 4 }
+} as const;
+
+export type SupirTierName = keyof typeof SUPIR_TIERS;
+
 /** SUPIR 修复工作流：LoadImage -> SUPIR_Upscale -> SaveImage。节点 id 复用 NODE 常量，进度映射零改动。 */
-export function buildSupirPrompt(inputName: string, scaleBy: number, filenamePrefix: string): Record<string, unknown> {
+export function buildSupirPrompt(
+  inputName: string,
+  scaleBy: number,
+  filenamePrefix: string,
+  tier: SupirTierName = "fast"
+): Record<string, unknown> {
+  const tierParams = SUPIR_TIERS[tier] ?? SUPIR_TIERS.fast;
   return {
     [NODE.LOAD]: {
       class_type: "LoadImage",
@@ -174,9 +185,9 @@ export function buildSupirPrompt(inputName: string, scaleBy: number, filenamePre
         seed: SUPIR_DEFAULTS.seed,
         resize_method: "lanczos",
         scale_by: scaleBy,
-        steps: SUPIR_DEFAULTS.steps,
+        steps: tierParams.steps,
         restoration_scale: SUPIR_DEFAULTS.restorationScale,
-        cfg_scale: SUPIR_DEFAULTS.cfgScale,
+        cfg_scale: tierParams.cfgScale,
         a_prompt: SUPIR_DEFAULTS.positivePrompt,
         n_prompt: SUPIR_DEFAULTS.negativePrompt,
         s_churn: 5,
@@ -185,7 +196,7 @@ export function buildSupirPrompt(inputName: string, scaleBy: number, filenamePre
         cfg_scale_start: 4.0,
         control_scale_start: 0.0,
         color_fix_type: "Wavelet",
-        keep_model_loaded: false,
+        keep_model_loaded: true,
         use_tiled_vae: true,
         encoder_tile_size_pixels: 512,
         decoder_tile_size_latent: 64,
@@ -212,7 +223,7 @@ export function buildSupirPrompt(inputName: string, scaleBy: number, filenamePre
 }
 
 export function describeSupirWorkflow(): string {
-  return `LoadImage -> SUPIR_Upscale(${SUPIR_DEFAULTS.supirModel} + ${SUPIR_DEFAULTS.sdxlModel}, steps ${SUPIR_DEFAULTS.steps}, RestoreDPMPP2MSampler, Wavelet) -> SaveImage`;
+  return `LoadImage -> SUPIR_Upscale(${SUPIR_DEFAULTS.supirModel} + ${SUPIR_DEFAULTS.sdxlModel}, RestoreDPMPP2MSampler, Wavelet) -> SaveImage`;
 }
 
 export function buildStandardPromptTemplate(modelName: string): Record<string, unknown> {

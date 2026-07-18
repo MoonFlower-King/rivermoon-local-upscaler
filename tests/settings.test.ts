@@ -44,7 +44,14 @@ describe("sanitizeSettings", () => {
       outputFormat: "png",
       outputDirectory: null,
       maxSide: 4096,
-      upscaleModel: "4x-UltraSharp.pth"
+      upscaleModel: "4x-UltraSharp.pth",
+      supirTier: "fast"
     });
+  });
+
+  it("supirTier 只认 fast/quality，非法值归一为 fast", () => {
+    expect(sanitizeSettings({ supirTier: "quality" }).supirTier).toBe("quality");
+    expect(sanitizeSettings({ supirTier: "ultra" } as unknown).supirTier).toBe("fast");
+    expect(sanitizeSettings({}).supirTier).toBe("fast");
   });
 });

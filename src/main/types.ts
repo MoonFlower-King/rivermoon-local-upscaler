@@ -5,6 +5,9 @@ export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancell
 
 export type ProcessingMode = "webClear" | "aiUpscale" | "aiUpscaleWebClear" | "aiRepair";
 
+/** SUPIR 修复强度：fast=medium×1.5（快速出图），quality=high×4（大图高清）。 */
+export type SupirTier = "fast" | "quality";
+
 /** 资源状态卡片用的质量档位标识（当前固定 standard = 网站同款 AI）。 */
 export type QualityMode = "standard";
 
@@ -21,6 +24,8 @@ export type UpscaleSettings = {
   maxSide: number;
   /** 超分模型文件名（必须在 model-registry 注册表内）；默认网站同款 4x-UltraSharp。 */
   upscaleModel: string;
+  /** SUPIR 修复强度（仅 aiRepair 模式生效）。 */
+  supirTier: SupirTier;
 };
 
 export type ImageDimensions = {

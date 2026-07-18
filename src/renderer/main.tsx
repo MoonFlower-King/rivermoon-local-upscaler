@@ -794,11 +794,37 @@ function SettingsPanel({
               SUPIR 智能修复
               <small>
                 {modelStatus?.supirAvailable
-                  ? "扩散修复 high 档 ×4，专救模糊/失焦；小图数分钟、大图更久"
+                  ? "扩散修复，专救模糊/失焦；模型驻留显存，连跑不重载"
                   : "需要本机 ComfyUI 带 SUPIR 节点与模型，当前未检测到"}
               </small>
             </span>
           </label>
+          {settings.processingMode === "aiRepair" ? (
+            <div className="radio-group supir-tier-group">
+              <label className="radio-row">
+                <input
+                  type="radio"
+                  name="supir-tier"
+                  checked={settings.supirTier === "fast"}
+                  onChange={() => onChange({ ...settings, supirTier: "fast" })}
+                />
+                <span>
+                  快速 ×1.5<small>15 步采样，出图快，日常首选</small>
+                </span>
+              </label>
+              <label className="radio-row">
+                <input
+                  type="radio"
+                  name="supir-tier"
+                  checked={settings.supirTier === "quality"}
+                  onChange={() => onChange({ ...settings, supirTier: "quality" })}
+                />
+                <span>
+                  高清 ×4<small>25 步采样放大 4 倍，大图精修，耗时更久</small>
+                </span>
+              </label>
+            </div>
+          ) : null}
           <label className="radio-row">
             <input
               type="radio"

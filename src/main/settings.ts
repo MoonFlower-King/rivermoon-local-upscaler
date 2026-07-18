@@ -11,7 +11,9 @@ export const DEFAULT_SETTINGS: UpscaleSettings = {
   outputFormat: "png",
   outputDirectory: null,
   maxSide: 4096,
-  upscaleModel: DEFAULT_UPSCALE_MODEL
+  upscaleModel: DEFAULT_UPSCALE_MODEL,
+  // fast = 用户 2026-05 满意批次里的快速档（medium×1.5，CodexEnhanced_00006 配方）。
+  supirTier: "fast"
 };
 
 /** 把任意来源（IPC 载荷、磁盘 JSON）的设置规整成合法的 UpscaleSettings。 */
@@ -24,7 +26,8 @@ export function sanitizeSettings(input: unknown): UpscaleSettings {
     outputDirectory:
       typeof merged.outputDirectory === "string" && merged.outputDirectory ? merged.outputDirectory : null,
     maxSide: normalizeMaxSide(merged.maxSide),
-    upscaleModel: normalizeUpscaleModel(merged.upscaleModel)
+    upscaleModel: normalizeUpscaleModel(merged.upscaleModel),
+    supirTier: merged.supirTier === "quality" ? "quality" : "fast"
   };
 }
 

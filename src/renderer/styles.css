@@ -943,6 +943,13 @@ input[type="range"] {
   display: none;
 }
 
+/* SUPIR 强度子选项：缩进挂在主选项下，视觉上从属 */
+.supir-tier-group {
+  margin: 2px 0 4px 26px;
+  padding-left: 10px;
+  border-left: 2px solid var(--control-bg-hover);
+}
+
 /* 删除按钮靠右独立成组，悬浮时提示破坏性 */
 .job-actions .job-delete {
   margin-left: auto;

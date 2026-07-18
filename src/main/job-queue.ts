@@ -16,7 +16,7 @@ import {
 } from "./image.js";
 import { buildOutputPath } from "./output-path.js";
 import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
-import { SUPIR_DEFAULTS } from "./comfy-protocol.js";
+import { SUPIR_TIERS } from "./comfy-protocol.js";
 import { runWebClearEngine } from "./web-clear-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
@@ -353,7 +353,7 @@ async function computeJobTargetDimensions(
     return computeWorkerOutputDimensions(inputPath, settings.maxSide || 4096);
   if (settings.processingMode === "webClear") return computeWebClearDimensions(dimensions, settings.maxSide);
   if (settings.processingMode === "aiRepair")
-    return computeSupirDimensions(dimensions, settings.maxSide, SUPIR_DEFAULTS.maxScale);
+    return computeSupirDimensions(dimensions, settings.maxSide, SUPIR_TIERS[settings.supirTier].maxScale);
   return computeTargetDimensions(dimensions, settings.maxSide, DEFAULT_SCALE);
 }
 

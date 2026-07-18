@@ -794,7 +794,7 @@ function SettingsPanel({
               SUPIR 智能修复
               <small>
                 {modelStatus?.supirAvailable
-                  ? "网站「AI 增强」同款扩散修复，能救模糊/失焦，单张数分钟"
+                  ? "扩散修复，专救模糊/失焦（本机智能增强工作流），单张数分钟"
                   : "需要本机 ComfyUI 带 SUPIR 节点与模型，当前未检测到"}
               </small>
             </span>

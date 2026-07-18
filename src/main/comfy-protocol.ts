@@ -136,8 +136,10 @@ export function describeStandardWorkflow(): string {
 }
 
 /**
- * 网站「AI 增强」链路的 SUPIR 扩散修复参数——逐项照抄生产 worker 的
- * CodexSmartEnhance 节点（medium 档）与 Codex_AI_Smart_Enhancer_Workflow.json 存档值。
+ * SUPIR 扩散修复参数——逐项照抄本机 CodexSmartEnhance 节点（medium 档）与
+ * Codex_AI_Smart_Enhancer_Workflow.json 存档值。注意：这是本机智能增强工作流；
+ * 网站生产 ai-enhance 派发的是 ai_4x_ultrasharp 预设（= aiUpscale 模式的 UltraSharp 链），
+ * 已经服务器 server.js 派发段核实（2026-07-16）。
  * 影响输出的参数不得改动；keep_model_loaded 是纯运维参数，
  * 桌面版取 false 以便任务后释放显存（不影响画质）。
  */

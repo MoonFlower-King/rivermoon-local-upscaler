@@ -210,3 +210,11 @@
   桌面新增 processingMode=aiRepair 1:1 复刻（buildSupirPrompt，keep_model_loaded=false 为唯一
   运维性差异）；supirResources() 探测门控 UI；尺寸上限 1.5x。commit 3da80c6。
   存档工作流：D:/ComfyUI/Codex_AI_Smart_Enhancer_Workflow.json。
+- 2026-07-16 M12 修正（用户 SSH 贴出 server.js 派发段 + 本机找到生产 worker 脚本
+  C:/Users/28692/Documents/e/local-gpu-worker/rivermoon-local-gpu-worker.js）：
+  **网站生产 ai-enhance 预设固定 ai_4x_ultrasharp（UltraSharp 工作流），SUPIR 是本机实验链路、
+  生产未接**。worker 的 prompt 图（节点 1-5 LoadImage→UpscaleModelLoader→ImageUpscaleWithModel→
+  ImageScale(lanczos)→SaveImage）与桌面 buildStandardPrompt 逐字段一致，尺寸公式
+  min(4, 4096/长边) 与 computeWorkerOutputDimensions 一致，连 rivermoon_ai_ 前缀、
+  D:/ComfyUI:8188 实例都相同——「网站 AI 高清修复」模式与网站按钮可证等同。
+  SUPIR 档 UI 文案已去掉「网站同款」表述。

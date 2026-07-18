@@ -1,34 +1,38 @@
 name: CI
 
-# 仅做「源代码可编译」校验：不下载 GB 级 ComfyUI 运行时，不打包 exe。
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: 类型检查与构建
+  validate:
+    name: Source validation
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: 安装 Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: npm ci
 
-      - name: 类型检查
-        run: npm run typecheck
-
-      - name: 构建（主进程 + 渲染层）
-        run: npm run build
-
-      - name: 单元测试
-        run: npm test
+      - name: Validate public source tree
+        run: npm run check

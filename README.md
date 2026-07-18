@@ -1,134 +1,155 @@
-# RiverMoon 本地超分
+<div align="center">
+  <img src="build/icon.png" width="88" alt="RiverMoon" />
+  <h1>RiverMoon AI 创作台</h1>
+  <p>连接 RiverMoon 云端 AI 能力与用户本机 NVIDIA 显卡的 Windows 桌面创作应用。</p>
 
-> 一个 **完全本地运行** 的 Windows 图片超分（放大 / 高清化）桌面工具。
-> 拖入图片即可用「网站同款 AI 链路」在本机处理，**不上传云端、不需要任何 API Key**。
+  [English](README.en.md) · [用户指南](docs/USER_GUIDE_BILINGUAL.md) · [产品报告](docs/PRODUCT_REPORT_BILINGUAL.md)
 
-![平台](https://img.shields.io/badge/platform-Windows%20x64-blue)
-![许可](https://img.shields.io/badge/license-MIT-green)
-![技术栈](https://img.shields.io/badge/Electron-React-blueviolet)
+  [![CI](https://github.com/MoonFlower-King/rivermoon-local-upscaler/actions/workflows/ci.yml/badge.svg)](https://github.com/MoonFlower-King/rivermoon-local-upscaler/actions/workflows/ci.yml)
+  [![CodeQL](https://github.com/MoonFlower-King/rivermoon-local-upscaler/actions/workflows/codeql.yml/badge.svg)](https://github.com/MoonFlower-King/rivermoon-local-upscaler/actions/workflows/codeql.yml)
+  [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+  ![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)
+</div>
 
----
+## 产品边界
 
-## ✨ 核心功能
+RiverMoon AI 创作台包含云端创作能力和本地 GPU 工具，两类能力的数据边界不同：
 
-- 🖼️ **本地超分**：基于 ComfyUI + PyTorch/CUDA + `4x-UltraSharp.pth`，效果对齐旧网页端「AI 高清」。
-- 🔒 **隐私优先**：图片不出本机，内置 ComfyUI 仅监听 `127.0.0.1`。
-- 📂 **批量处理**：支持单图、多选、整文件夹递归扫描。
-- 🎚️ **可控输出**：PNG / JPEG / WebP；最大长边可调（默认 4096，填 `0` = 真实 4x）。
-- 📊 **真实进度**：进度来自 ComfyUI 的 websocket 事件 / history 状态，不按时间伪造。
-- 🗂️ **任务记录持久化**：关闭重开仍在，最新任务置顶，显示每个任务的耗时。
-- 🔍 **前后对比**：成功任务支持滑块对比、滚轮缩放、拖动画面。
-- 🩺 **自助诊断**：右侧资源 / CUDA 检测卡片，关于页可导出诊断日志。
+| 模块 | 执行位置 | 是否需要 RiverMoon API Key | 用户内容是否上传 |
+| --- | --- | --- | --- |
+| AI 生图 | RiverMoon 图片网关 | 是 | 提示词和参考图会发送到云端 |
+| AI 视频 | RiverMoon 视频网关 | 是 | 提示词和参考图会发送到云端 |
+| GPT 对话与图片分析 | RiverMoon Agent 网关 | 是 | 对话和图片附件会发送到云端 |
+| 图片超分 | 用户本机 ComfyUI/CUDA | 否 | 否 |
+| 图片超分 · 智能模式（可选） | 分流判定走云端，处理仍在本机 | 是 | 会把缩小的预览图（512 长边）发送到云端做类型判定 |
 
-## 🧱 技术栈
+超分默认完全本地离线。只有用户主动选择「智能模式」时，才会把一张 512 长边的预览图发给云端 GPT 判定图片类型（照片/插画/文字），随后的图像处理仍全部在本机完成；未连接 Key 或云端不可达时自动回退纯本地链路。
 
-| 层 | 技术 |
-| --- | --- |
-| 桌面外壳 | Electron 34 |
-| 界面 | React 19 + TypeScript + Vite |
-| 主进程 | Node.js（TypeScript，strict） |
-| 图像处理 | sharp（libvips） |
-| 推理引擎 | 内置 ComfyUI + PyTorch + CUDA |
-| 超分模型 | 4x-UltraSharp.pth |
+本仓库开源的是 Windows 桌面客户端。`rivermoon7.com` 托管服务及其服务端实现不包含在本仓库中；使用云端模块需要用户自行获取 API Key。
 
-处理链路：
+## 功能
+
+- AI 生图：实时图片合同、模型/质量/格式/尺寸、参考图编辑、自定义尺寸和分镜模板。
+- AI 视频：HTTPS 实时合同、文生视频、图生视频、多参考图、任务恢复和本地下载。
+- GPT 对话：Responses 流式输出、推理强度、图片分析和本机对话历史。
+- 本地超分：ComfyUI + PyTorch/CUDA，五种处理模式（网站 AI 高清修复 / AI+网页增强 / 仅网页增强 / SUPIR 扩散修复 / GPT 智能分流），多模型注册表（4x-UltraSharp、RealESRGAN x4plus、RealESRGAN Anime6B）按需下载，默认最大长边 4096。
+- 资产库：统一查看生图、视频和超分产物。
+- 账户与更新：API Key 安全存储、余额、充值入口、诊断和 GitHub Release 更新检查。
+
+## 安全架构
 
 ```text
-LoadImage
-  → UpscaleModelLoader(4x-UltraSharp.pth)
-  → ImageUpscaleWithModel
-  → ImageScale(Lanczos, 目标宽高)
-  → SaveImage
+React renderer
+  -> typed contextBridge IPC
+  -> Electron main process
+      -> RiverMoon image/video/agent gateways
+      -> local ComfyUI on 127.0.0.1
+      -> local task and asset persistence
 ```
 
-## ⚙️ 环境要求
+- 渲染层不直接访问网络，也不接触明文 API Key。
+- API Key 由 Electron 主进程使用 `safeStorage` 加密保存。
+- 本地文件读取受主进程路径白名单约束。
+- 视频认证请求只访问 HTTPS 网关；外部 CDN 下载不携带 API Key。
+- 诊断输出会清理 Key、签名 URL 和本机路径等敏感信息。
 
-- Windows 10 / 11 x64
-- **NVIDIA 显卡 + 可用 CUDA 驱动**（当前无 CPU / DirectML / AMD / Intel fallback）
-- 开发：[Node.js](https://nodejs.org/) 20 LTS+、[Git](https://git-scm.com/)
-- 本地一份 [ComfyUI](https://github.com/comfyanonymous/ComfyUI)（供准备脚本复制运行时）
+更多信息见 [SECURITY.md](SECURITY.md)。
 
-## 🚀 快速开始（开发）
+## 源码快速开始
 
-```bash
-# 1. 克隆
-git clone https://github.com/<your-name>/rivermoon-local-upscaler.git
+### 前置条件
+
+- Windows 10/11 x64
+- Node.js 20 或更高版本
+- Git
+- 完整测试本地超分时需要 NVIDIA 显卡、CUDA 驱动和本机 ComfyUI/PyTorch 运行时
+
+### 安装与检查
+
+```powershell
+git clone https://github.com/MoonFlower-King/rivermoon-local-upscaler.git
 cd rivermoon-local-upscaler
+npm ci
+npm run check
+```
 
-# 2. 安装依赖
-npm install
+`npm run check` 会执行公开仓库预检、格式检查、lint、全量单元测试（237+ 项）和生产构建。源码构建不需要下载数 GB 的 ComfyUI 运行时。
 
-# 3. （可选）配置本地环境变量
-copy .env.example .env   # 然后按需修改
+### 启动桌面开发环境
 
-# 4. 准备 ComfyUI 运行时（体积大，不随仓库提供）
-#    -SourceComfyUI 指向你本机已有的 ComfyUI 目录
-powershell -ExecutionPolicy Bypass -File scripts/prepare-comfyui-runtime.ps1 -SourceComfyUI "本机ComfyUI路径"
-#    并把 4x-UltraSharp.pth 放到：
-#    resources/comfyui-runtime/models/upscale_models/4x-UltraSharp.pth
-
-# 5. 启动开发模式
+```powershell
 npm run dev:electron
 ```
 
-> 💡 本机若设置了 `ELECTRON_RUN_AS_NODE=1`，开发必须用 `npm run dev:electron`
-> （脚本会自动清掉该变量），否则 Electron 会以纯 Node 模式启动而看不到窗口。
+云端模块可在应用设置页连接用户自己的 RiverMoon API Key。本地超分需要先准备运行时：
 
-## 📦 构建与打包
-
-```bash
-npm run build       # 类型检查 + 编译主进程/渲染层到 dist/
-npm run dist:dir    # 生成免安装目录：release/win-unpacked/
-npm run dist        # 生成 NSIS 安装包
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/prepare-comfyui-runtime.ps1 `
+  -SourceComfyUI "D:\ComfyUI"
 ```
 
-> ⚠️ 打包产物体积较大（内置 ComfyUI/PyTorch/CUDA）。交付免安装版时需复制**整个**
-> `release/win-unpacked/` 目录，不能只复制 exe。
+仓库和安装包都不提交 `4x-UltraSharp.pth`。应用会在用户主动操作后下载并校验模型。该模型存在非商业授权限制，详见 [NOTICE](NOTICE)。
 
-## ⚙️ 配置说明
+## 环境变量
 
-| 环境变量 | 作用 | 默认 |
-| --- | --- | --- |
-| `RIVERMOON_USE_EXTERNAL_COMFYUI` | 开发期复用外部 ComfyUI（`1` 开启） | `0` |
-| `RIVERMOON_COMFYUI_URL` | 外部 ComfyUI 地址 | `http://127.0.0.1:8188` |
-| `RIVERMOON_COMFYUI_ROOT` | 自定义 runtime 根目录 | 内置 `resources/comfyui-runtime` |
+应用不会自动加载 `.env` 文件。需要开发测试变量时，请在当前 PowerShell 会话显式设置：
 
-应用内可调：输出格式、最大长边、输出目录。详见 `.env.example` 与 [中文使用教程](docs/中文使用教程.md)。
+```powershell
+$env:RIVERMOON_TEST_KEY = "your-development-key"
+npm run dev:electron
+```
 
-## 📁 目录结构
+不要把真实 Key 写进脚本、Issue、PR、截图或日志。完整变量说明见 [.env.example](.env.example)。
+
+## 构建 Windows 交付目录
+
+```powershell
+npm run dist:dir
+npm run release:smoke
+npm run release:launch-smoke
+```
+
+输出目录：
 
 ```text
-src/
-  main/        Electron 主进程：IPC、任务队列、ComfyUI 引擎、硬件检测、持久化
-  preload/     contextBridge 安全桥
-  renderer/    React UI
-scripts/       运行时准备 / 模型下载脚本
-docs/          架构、构建、使用教程等文档
-build/         应用图标
+release/win-unpacked/
 ```
 
-## 📖 使用教程
+必须分发整个目录，不能只复制 exe。完整运行时约数 GB，因此 GitHub Release 使用分卷 7-Zip 资产；见 [构建与发布文档](docs/BUILD_AND_RELEASE.md)。
 
-详见 [docs/中文使用教程.md](docs/中文使用教程.md) 与 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+## 开源仓库约束
 
-## ⚖️ 开源协议
+以下内容必须留在 Git 仓库之外：
 
-本项目**源代码**以 [MIT](LICENSE) 许可发布。
+- `resources/comfyui-runtime/`
+- 模型权重，如 `.pth`、`.safetensors`、`.onnx`
+- `release/`、`dist/`、`release-check/`
+- `.local-user-data/`、日志、任务记录和本机资产
+- `.env*`、API Key、签名 URL、代码签名证书
 
-> ⚠️ **重要合规提示**：应用运行所依赖的第三方组件各有独立且更严格的许可，**不受 MIT 约束**：
-> - ComfyUI → GPL-3.0
-> - `4x-UltraSharp.pth` → CC-BY-NC-SA 4.0（**仅限非商业**）
-> - CUDA 运行库 → NVIDIA EULA
->
-> **任何商业分发前**，必须先解决上述授权（尤其替换非商业模型）。详见 [NOTICE](NOTICE)。
+推送前运行：
 
-## 🤝 贡献
+```powershell
+npm run repo:preflight
+```
 
-欢迎提 Issue 与 PR！请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-安全问题请走私密渠道，见 [SECURITY.md](SECURITY.md)。
+发布 tag 前使用严格模式：
 
-## ❗ 已知限制
+```powershell
+npm run repo:preflight:strict
+```
 
-- 仅支持 Windows x64 + NVIDIA CUDA，暂无其它后端 fallback。
-- 内置完整 ComfyUI/PyTorch/CUDA 时交付体积较大。
-- 默认模型为非商业授权，商用前必须替换或取得授权。
+详细清单见 [开源发布检查表](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md)。
+
+## 文档
+
+- [用户指南（中英双语）](docs/USER_GUIDE_BILINGUAL.md)
+- [产品报告（中英双语）](docs/PRODUCT_REPORT_BILINGUAL.md)
+- [架构](docs/ARCHITECTURE.md)
+- [贡献指南](CONTRIBUTING.md)
+- [支持渠道](SUPPORT.md)
+- [第三方授权](NOTICE)
+
+## 许可证
+
+本仓库中由项目贡献者编写的源码采用 [MIT License](LICENSE)。第三方运行时、模型权重、托管服务和品牌资产受各自条款约束，不因本仓库采用 MIT 而自动获得相同授权。

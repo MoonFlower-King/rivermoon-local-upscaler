@@ -1,52 +1,43 @@
-# 更新日志（Changelog）
+# Changelog
 
-本文件记录所有重要变更。
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+本文件记录面向用户和贡献者的重要变化，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/)。
 
 ## [Unreleased]
 
-### 新增 Added
-- 开源配套文件：`.gitignore`、`.env.example`、`LICENSE`(MIT)、`NOTICE`、
-  `CONTRIBUTING.md`、`SECURITY.md`、`CHANGELOG.md`，以及 `.github/` 下的
-  Issue / PR 模板与 CI 工作流。
+### Added
 
-### 新增（优化迭代）
-- 引入 `vitest` 单元测试与 `npm test`，覆盖 `sanitizeSettings` / `computeTargetDimensions` /
-  任务记录归一化等纯函数；CI 增加测试步骤。
-- 渲染层预览并发限流（最多 4 路）、`IntersectionObserver` 懒加载、LRU 缓存。
-- 应用退出时清理内置 ComfyUI 子进程；新增单实例锁。
+- AI 视频：HTTPS 能力合同、文生/图生/多参考图、任务恢复与本地下载。
+- GPT 对话：Responses 流式输出、推理强度、图片分析和本机历史。
+- AI 生图实时合同、参考图编辑、自定义尺寸、原生直出与分镜模板。
+- AI 生图会话式工作台：独立会话列表、会话内任务流、提交即出现的多任务卡片，以及结果图一键继续编辑。
+- GitHub 开源配套：中英文 README、贡献/安全/支持文档、CodeQL、Dependabot、CODEOWNERS。
+- `npm run repo:preflight`：检查待公开文件、Git 历史大对象、密钥痕迹和生成物。
+- 超分处理模式扩展为五档：网站 AI 高清修复（UltraSharp 工作流）、AI+网页增强、仅网页增强（秒级 sharp 链）、SUPIR 扩散修复（快速×1.5 / 高清×4 双强度，需本机 SUPIR 环境）、智能模式（GPT 看图自动分流，未连接 Key 自动回退本地链路）。
+- 超分模型注册表新增 RealESRGAN x4plus 与 RealESRGAN Anime6B（均 BSD-3 可商用，按需下载 + SHA256 校验）。
+- 任务记录支持逐条删除（不删除输出文件）。
 
-### 变更 Changed
-- `README.md` 改写为标准开源文档（移除本机绝对路径，补充部署/依赖/授权说明）。
-- `scripts/prepare-comfyui-runtime.ps1` 移除硬编码的个人 Python 路径，改为自动探测 + 参数传入。
-- 任务持久化解耦：UI 广播与磁盘落盘分离，进度更新节流（≤1 次/500ms、异步）。
-- `UpscaleSettings` 收敛为 `outputFormat/outputDirectory/maxSide`，模型与倍数改为产品常量。
-- 「最大长边」语义改为**仅放大、绝不缩小**；按 EXIF 朝向归一化尺寸与预览。
-- 抽离 `jobs-normalize.ts`（纯函数，便于测试）；ComfyUI 节点 id 收敛为 `NODE` 常量。
-- `UpscalerApi` 接口单点定义，preload `satisfies` + `global.d.ts` 引用，杜绝漂移。
-- `@vitejs/plugin-react` 移至 devDependencies；新增 `engines.node >= 20`。
+### Changed
 
-### 安全 Security
-- 主进程增加外部导航与新窗口拦截（`setWindowOpenHandler` / `will-navigate`），
-  并为渲染层注入 `Content-Security-Policy`。
-- 增加 IPC 入参基础校验与主进程全局异常兜底。
-- 渲染层启用 `sandbox`（需打包后冒烟验证）。
+- 产品定位从单功能本地超分更新为 RiverMoon AI 创作台。
+- 新用户默认进入 AI 生图，已使用用户恢复上次模块。
+- 生图工作区升级为左侧会话列表、右侧任务时间线和底部参数区的双栏布局，并保留创作舞台替换边界。
+- 旧版平铺生图记录升级后自动归入「历史生成」会话；删除会话仅解除任务关联，不删除已有任务。
+- 安装包和 Git 仓库均不包含 `4x-UltraSharp.pth`；模型由用户主动下载。
+- 公开文档明确区分本地超分与云端 AI 模块的数据边界。
 
-### 修复 Fixed
-- 任务记录改**原子写**（tmp + rename），修复写入途中崩溃导致 `jobs.json` 损坏丢失的风险。
-- 任务结束后清理复制进 ComfyUI input 目录的临时输入文件，修复磁盘占用持续增长的问题。
-- 窗口加载失败兜底（`showErrorBox`）；渲染层 `ErrorBoundary` 防白屏；弹窗支持 Esc 关闭。
-- 移除大量死代码（`upscaler-engine` / `engine-errors` 及 `paths`/`image` 未用导出等）。
+### Security
+
+- API Key 仅在 Electron 主进程中使用，并通过 `safeStorage` 加密保存。
+- 视频签名 URL 不进入任务持久化和诊断文本。
+- 公开仓库预检阻止常见凭据、大文件、用户数据和运行时目录误提交。
 
 ## [0.1.0] - 2026-06-28
 
-### 新增 Added
-- 首个内部交付版本：本地「网站同款 AI」超分链路
-  （ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth）。
-- 中文界面、拖拽/文件夹递归导入、PNG/JPEG/WebP 输入输出。
-- 任务队列、取消、进度（来自 ComfyUI 真实事件）、任务记录持久化、前后对比缩放。
-- 右侧资源/CUDA 检测卡片、关于页、诊断日志导出。
+### Added
 
-[Unreleased]: https://github.com/<your-name>/rivermoon-local-upscaler/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/<your-name>/rivermoon-local-upscaler/releases/tag/v0.1.0
+- 首个内部 Windows 版本。
+- 本地 ComfyUI/CUDA 图片超分、任务队列、真实进度、持久化和前后对比。
+- RiverMoon API Key、账户状态、AI 生图和资产库基础能力。
+
+[Unreleased]: https://github.com/MoonFlower-King/rivermoon-local-upscaler/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/MoonFlower-King/rivermoon-local-upscaler/releases/tag/v0.1.0

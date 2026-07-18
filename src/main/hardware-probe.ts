@@ -3,10 +3,13 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { comfyMainPath, comfyPythonPath, findComfyModel } from "./paths.js";
+import { UPSCALE_MODEL_REGISTRY } from "./model-registry.js";
 import { log } from "./logger.js";
 import type { GpuInfo, HardwareReport } from "./types.js";
 
 const GPU_QUERY_TIMEOUT_MS = 8000;
+/** CUDA 自检要冷启动 python + torch，比 WMI 查询慢得多，超时给足。 */
+const CUDA_PROBE_TIMEOUT_MS = 15_000;
 
 /**
  * 带缓存的硬件检测。ComfyUI Runtime / 模型指纹未变时直接返回上次结果；
@@ -27,12 +30,12 @@ function cachePath(): string {
   return path.join(app.getPath("userData"), "hardware-cache.json");
 }
 
-/** ComfyUI Runtime 和 4x-UltraSharp 模型指纹；任一变化即让缓存失效。 */
+/** ComfyUI Runtime 与注册表全部模型的指纹；任一变化即让缓存失效。 */
 function hardwareFingerprint(): string {
   const comfyPython = comfyPythonPath() ?? "none";
   const comfyMain = fs.existsSync(comfyMainPath()) ? comfyMainPath() : "none";
-  const comfyModel = findComfyModel("4x-UltraSharp.pth") ?? "none";
-  return `${comfyPython}|${comfyMain}|${comfyModel}`;
+  const models = UPSCALE_MODEL_REGISTRY.map((spec) => findComfyModel(spec.fileName) ?? "none").join(",");
+  return `${comfyPython}|${comfyMain}|${models}`;
 }
 
 function readCache(): { fingerprint: string; report: HardwareReport } | null {
@@ -62,12 +65,18 @@ export async function probeHardware(): Promise<HardwareReport> {
   const issues: string[] = [];
   const hints: string[] = [];
 
-  const comfyRuntimeFound = Boolean(comfyPythonPath() && fs.existsSync(comfyMainPath()) && findComfyModel("4x-UltraSharp.pth"));
+  // 运行时（引擎）与模型分开判断：模型按需下载是正常状态，不应报成“引擎缺失”。
+  const comfyRuntimeFound = Boolean(comfyPythonPath() && fs.existsSync(comfyMainPath()));
+  // 注册表内任一模型已安装即认为链路具备模型（所选模型缺失由资源状态另行提示）。
+  const modelFound = UPSCALE_MODEL_REGISTRY.some((spec) => Boolean(findComfyModel(spec.fileName)));
   const gpus = await queryGpus();
 
   if (!comfyRuntimeFound) {
-    issues.push("未找到网站同款 ComfyUI Runtime。");
-    hints.push("如需网站同款质量，请安装完整版，或先运行 scripts\\prepare-comfyui-runtime.ps1 准备 resources/comfyui-runtime。");
+    issues.push("未找到内置 AI 引擎运行时。");
+    hints.push("请重新安装完整版，或先运行 scripts\\prepare-comfyui-runtime.ps1 准备 resources/comfyui-runtime。");
+  } else if (!modelFound) {
+    issues.push("超分模型尚未下载。");
+    hints.push("打开「图片超分」页，点击「下载模型」即可开始使用（约 64MB）。");
   }
 
   const durationMs: number | null = null;
@@ -85,7 +94,7 @@ export async function probeHardware(): Promise<HardwareReport> {
   }
 
   const report: HardwareReport = {
-    ok: comfyRuntimeFound && comfyuiCudaAvailable,
+    ok: comfyRuntimeFound && comfyuiCudaAvailable && modelFound,
     comfyuiRuntimeFound: comfyRuntimeFound,
     comfyuiCudaAvailable,
     cudaDevices,
@@ -105,7 +114,9 @@ async function probeComfyCuda(): Promise<{ ok: boolean; devices: string[]; issue
       ok: false,
       devices: [],
       issue: "未找到 ComfyUI 使用的 Python。",
-      hints: ["请确认 resources/comfyui-runtime 内包含 python_embeded/python.exe、python/python.exe 或 venv/Scripts/python.exe。"]
+      hints: [
+        "请确认 resources/comfyui-runtime 内包含 python_embeded/python.exe、python/python.exe 或 venv/Scripts/python.exe。"
+      ]
     };
   }
 
@@ -131,7 +142,7 @@ async function probeComfyCuda(): Promise<{ ok: boolean; devices: string[]; issue
     child.stderr.on("data", (chunk: Buffer) => {
       errorOutput += chunk.toString("utf8");
     });
-    const timer = setTimeout(() => child.kill(), 15000);
+    const timer = setTimeout(() => child.kill(), CUDA_PROBE_TIMEOUT_MS);
     child.on("error", () => {
       clearTimeout(timer);
       resolve({
@@ -211,9 +222,7 @@ function parseGpuJson(raw: string): GpuInfo[] {
         const name = typeof entry?.Name === "string" ? entry.Name.trim() : "";
         if (!name) return null;
         const driverVersion =
-          typeof entry?.DriverVersion === "string" && entry.DriverVersion.trim()
-            ? entry.DriverVersion.trim()
-            : null;
+          typeof entry?.DriverVersion === "string" && entry.DriverVersion.trim() ? entry.DriverVersion.trim() : null;
         return { name, driverVersion };
       })
       .filter((gpu): gpu is GpuInfo => gpu !== null);

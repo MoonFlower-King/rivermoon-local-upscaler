@@ -8,10 +8,20 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings("garbage")).toEqual(DEFAULT_SETTINGS);
   });
 
-  it("非法 outputFormat 归一为 png，合法值保留", () => {
+  it("outputFormat 固定为 worker SaveImage PNG", () => {
     expect(sanitizeSettings({ outputFormat: "gif" } as unknown).outputFormat).toBe("png");
-    expect(sanitizeSettings({ outputFormat: "webp" }).outputFormat).toBe("webp");
-    expect(sanitizeSettings({ outputFormat: "jpg" }).outputFormat).toBe("jpg");
+    expect(sanitizeSettings({ outputFormat: "auto" }).outputFormat).toBe("png");
+    expect(sanitizeSettings({ outputFormat: "webp" }).outputFormat).toBe("png");
+    expect(sanitizeSettings({ outputFormat: "jpg" }).outputFormat).toBe("png");
+  });
+
+  it("五种处理模式合法保留，非法值归一为网站 AI 模式", () => {
+    expect(sanitizeSettings({ processingMode: "remoteAi" } as unknown).processingMode).toBe("aiUpscale");
+    expect(sanitizeSettings({ processingMode: "aiUpscale" }).processingMode).toBe("aiUpscale");
+    expect(sanitizeSettings({ processingMode: "aiUpscaleWebClear" }).processingMode).toBe("aiUpscaleWebClear");
+    expect(sanitizeSettings({ processingMode: "webClear" }).processingMode).toBe("webClear");
+    expect(sanitizeSettings({ processingMode: "aiRepair" }).processingMode).toBe("aiRepair");
+    expect(sanitizeSettings({ processingMode: "aiAuto" }).processingMode).toBe("aiAuto");
   });
 
   it("maxSide <=0 视为不限制(0)，否则夹到 [256, 16384]", () => {
@@ -28,8 +38,21 @@ describe("sanitizeSettings", () => {
     expect(sanitizeSettings({ outputDirectory: "D:/out" }).outputDirectory).toBe("D:/out");
   });
 
-  it("忽略已废弃的多余字段，只保留三项", () => {
+  it("忽略已废弃的多余字段，只保留当前设置项", () => {
     const result = sanitizeSettings({ outputFormat: "png", model: "x", scale: 2, engineMode: "y" } as unknown);
-    expect(result).toEqual({ outputFormat: "png", outputDirectory: null, maxSide: 4096 });
+    expect(result).toEqual({
+      processingMode: "aiUpscale",
+      outputFormat: "png",
+      outputDirectory: null,
+      maxSide: 4096,
+      upscaleModel: "4x-UltraSharp.pth",
+      supirTier: "fast"
+    });
+  });
+
+  it("supirTier 只认 fast/quality，非法值归一为 fast", () => {
+    expect(sanitizeSettings({ supirTier: "quality" }).supirTier).toBe("quality");
+    expect(sanitizeSettings({ supirTier: "ultra" } as unknown).supirTier).toBe("fast");
+    expect(sanitizeSettings({}).supirTier).toBe("fast");
   });
 });

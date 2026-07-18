@@ -1,39 +1,68 @@
-RiverMoon 本地超分 —— 第三方组件与授权声明（NOTICE）
-================================================================
+RiverMoon AI Studio - third-party and service notice
+====================================================
 
-本项目自身源代码以 MIT 许可发布（见 LICENSE）。
-但应用要正常运行，依赖以下第三方组件。这些组件**不随仓库提交**，而是在本地
-通过 scripts/prepare-comfyui-runtime.ps1 准备或由用户自行下载。它们各自的授权
-独立于本项目，**商业分发前必须逐项确认合规**。
+The MIT License in LICENSE applies only to source code and documentation
+authored by contributors to this repository.
 
-----------------------------------------------------------------
-1. ComfyUI
-   - 用途：内置推理引擎（resources/comfyui-runtime）
-   - 许可：GPL-3.0
-   - 说明：GPL 具有传染性。若你将 ComfyUI 与本应用一起打包分发，需评估是否
-     触发 GPL 的开源义务。仅在本地运行、不分发 ComfyUI 时风险较低。
-   - 项目主页：https://github.com/comfyanonymous/ComfyUI
+This repository intentionally excludes the following components. Their own
+licenses or terms continue to apply when users obtain, run, or redistribute
+them. This file is a technical inventory, not legal advice.
 
-2. PyTorch + CUDA 运行库
-   - 用途：模型推理（python_embeded 内）
-   - 许可：PyTorch 为 BSD-3-Clause；NVIDIA CUDA 运行库受 NVIDIA 最终用户许可
-     协议（EULA）约束，再分发有额外限制。
-   - 说明：再分发 CUDA 运行库前请阅读 NVIDIA EULA。
+1. RiverMoon hosted services
+   - Purpose: AI image generation, AI video generation, GPT chat, billing,
+     account status, and capability contracts.
+   - Location: rivermoon7.com and related RiverMoon gateways.
+   - Status: the hosted backend is not part of this repository and is not
+     licensed under this repository's MIT License.
+   - Users must obtain and use their own API Key under the applicable service
+     terms.
 
-3. 4x-UltraSharp.pth（超分模型）
-   - 用途：默认超分模型（4x-UltraSharp）
-   - 许可：CC-BY-NC-SA 4.0 —— **仅限非商业用途，且衍生需同方式共享**
-   - 风险：⚠️ 这是当前最高的合规风险。任何商业化分发都不得包含该模型。
-     商用前必须替换为可商用授权的模型（例如自行确认授权的 Real-ESRGAN 等），
-     或取得 4x-UltraSharp 作者的商用授权。
-   - 来源：https://huggingface.co/lokCX/4x-Ultrasharp
+2. ComfyUI
+   - Purpose: local image-upscaling workflow engine.
+   - Project: https://github.com/comfyanonymous/ComfyUI
+   - License: GPL-3.0 as published by the upstream project.
+   - The runtime is excluded from Git and must be prepared locally. Anyone
+     redistributing a package that contains ComfyUI must satisfy the upstream
+     license obligations.
 
-4. Electron / React / sharp 等 npm 依赖
-   - 许可：分别为 MIT / Apache-2.0 等宽松许可（详见 package-lock.json 及各包）
-   - sharp：Apache-2.0（内部捆绑 libvips，LGPL-3.0）
+3. PyTorch and NVIDIA CUDA runtime
+   - Purpose: local GPU inference.
+   - PyTorch license: BSD-style upstream license.
+   - CUDA runtime: NVIDIA license and redistribution terms.
+   - These binaries are excluded from the source repository. Redistribution
+     requires an independent license review.
 
-----------------------------------------------------------------
-结论：
-  - 开源「源代码」到 GitHub：安全（本仓库不含上述第三方二进制/模型）。
-  - 分发「整包 exe」：必须先解决 ComfyUI(GPL) 与 4x-UltraSharp(非商业) 的授权。
-  - 商业分发：在解决上述两项前，禁止。
+4. 4x-UltraSharp.pth
+   - Purpose: default local image-upscaling model.
+   - Recorded source: https://huggingface.co/lokCX/4x-Ultrasharp
+   - Recorded license: CC BY-NC-SA 4.0.
+   - The model is not committed to Git and is filtered from application
+     packages. The app downloads it only after explicit user action.
+   - The non-commercial restriction makes it unsuitable for an unreviewed
+     commercial distribution. Verify the current upstream license and obtain
+     any required permission before commercial use.
+
+5. RealESRGAN_x4plus.pth and RealESRGAN_x4plus_anime_6B.pth
+   - Purpose: optional local image-upscaling models.
+   - Project: https://github.com/xinntao/Real-ESRGAN
+   - Recorded license: BSD 3-Clause.
+   - The models are not committed to Git and are filtered from application
+     packages. The app downloads them only after explicit user action.
+
+6. SUPIR and SDXL checkpoints (SUPIR repair mode)
+   - Purpose: optional diffusion-based image repair. This mode activates only
+     when the user's own local ComfyUI runtime already provides the
+     ComfyUI-SUPIR custom node and the SUPIR/SDXL checkpoint files.
+   - Neither the node nor the checkpoints are committed to Git or shipped in
+     application packages.
+   - Upstream terms apply, including the SUPIR project license and the SDXL
+     CreativeML Open RAIL++-M license. Verify them before any redistribution
+     or commercial use.
+
+7. Electron, React, sharp, libvips, and npm dependencies
+   - These packages retain their upstream licenses. Consult package-lock.json
+     and the packages' own license files before redistribution.
+
+8. RiverMoon name, icon, and other brand assets
+   - The source-code license does not grant trademark rights. Use of project
+     branding must not imply endorsement by RiverMoon.

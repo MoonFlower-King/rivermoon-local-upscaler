@@ -1,17 +1,29 @@
 import { BrowserWindow } from "electron";
 import crypto from "node:crypto";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import {
+  computeSupirDimensions,
   computeTargetDimensions,
+  computeWorkerOutputDimensions,
+  computeWebClearDimensions,
   ensureDirectory,
   outputExtension,
-  readImageDimensions
+  readImageDimensions,
+  readImageHasAlpha,
+  readWorkerImageDimensions,
+  resolveConcreteFormat
 } from "./image.js";
-import { runComfyEngine } from "./comfy-engine.js";
+import { buildOutputPath } from "./output-path.js";
+import { interruptComfy, runComfyEngine } from "./comfy-engine.js";
+import { SUPIR_TIERS } from "./comfy-protocol.js";
+import { SMART_ROUTE_MODELS, analyzeImageForRoute } from "./smart-route.js";
+import { supirResources } from "./paths.js";
+import { runWebClearEngine } from "./web-clear-engine.js";
 import { DEFAULT_SCALE, sanitizeSettings } from "./settings.js";
 import { log } from "./logger.js";
 import { saveJobs, saveJobsSync } from "./jobs-store.js";
-import type { StartJobsPayload, UpscaleJob, UpscaleSettings } from "./types.js";
+import type { ConcreteImageFormat, StartJobsPayload, UpscaleJob, UpscaleSettings } from "./types.js";
 
 export class JobQueue {
   private jobs = new Map<string, UpscaleJob>();
@@ -19,6 +31,7 @@ export class JobQueue {
   private running = false;
   private abortControllers = new Map<string, AbortController>();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private uiTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly getWindow: () => BrowserWindow | null,
@@ -44,7 +57,7 @@ export class JobQueue {
       created.push(job);
     }
 
-    this.emit();
+    this.emitNow();
     void this.drain();
     return created;
   }
@@ -59,12 +72,14 @@ export class JobQueue {
       job.durationMs = 0;
       job.message = "已取消";
       this.queue = this.queue.filter((queuedId) => queuedId !== id);
-      this.emit();
+      this.emitNow();
       return job;
     }
 
     if (job.status === "running") {
       this.abortControllers.get(id)?.abort();
+      // 让 ComfyUI 立即中断 GPU 计算并清掉队列里的该任务，而不是任由它在后台算完。
+      void interruptComfy();
       return job;
     }
 
@@ -77,7 +92,20 @@ export class JobQueue {
         this.jobs.delete(id);
       }
     }
-    this.emit();
+    this.emitNow();
+  }
+
+  /** 删除单条任务记录（不动输出文件）。运行中的任务先取消再删，避免残留孤儿 AbortController。 */
+  removeJob(id: string): void {
+    const job = this.jobs.get(id);
+    if (!job) return;
+    if (job.status === "running") {
+      this.cancelJob(id);
+      return;
+    }
+    this.queue = this.queue.filter((queuedId) => queuedId !== id);
+    this.jobs.delete(id);
+    this.emitNow();
   }
 
   private async drain(): Promise<void> {
@@ -94,7 +122,7 @@ export class JobQueue {
       }
     } finally {
       this.running = false;
-      this.emit();
+      this.emitNow();
     }
   }
 
@@ -109,44 +137,141 @@ export class JobQueue {
       job.durationMs = null;
       job.progress = 5;
       job.message = "正在读取图片";
-      this.emit();
-      log(`任务开始 ${job.fileName} format=${job.settings.outputFormat} maxSide=${job.settings.maxSide}`);
+      this.emitNow();
+      log(
+        `任务开始 ${job.fileName} mode=${job.settings.processingMode} format=${job.settings.outputFormat} maxSide=${job.settings.maxSide}`
+      );
 
-      const dimensions = await readImageDimensions(job.inputPath);
+      const dimensions =
+        job.settings.processingMode === "aiUpscale"
+          ? ((await readWorkerImageDimensions(job.inputPath)) ?? (await readImageDimensions(job.inputPath)))
+          : await readImageDimensions(job.inputPath);
+      const hasAlpha = await readImageHasAlpha(job.inputPath);
+      const outputFormat = resolveJobOutputFormat(job.settings, hasAlpha);
       job.dimensions = dimensions;
-      job.targetDimensions = computeTargetDimensions(dimensions, job.settings.maxSide, DEFAULT_SCALE);
+      job.targetDimensions = await computeJobTargetDimensions(job.inputPath, dimensions, job.settings);
       job.progress = 15;
       this.emit();
 
       const outputDirectory = job.settings.outputDirectory || path.join(path.dirname(job.inputPath), "upscaled");
       await ensureDirectory(outputDirectory);
-      const outputPath = buildOutputPath(job.inputPath, outputDirectory, job.settings.outputFormat);
+      const outputPath = buildOutputPath(job.inputPath, outputDirectory, outputFormat);
       job.outputPath = outputPath;
 
-      job.tileSize = 512;
-      job.message = "正在用网站同款 CUDA 链路处理";
+      job.message = processingMessage(job.settings.processingMode);
       job.progress = 18;
       this.emit();
-      await runComfyEngine({
-        inputPath: job.inputPath,
-        outputPath,
-        settings: job.settings,
-        inputDimensions: dimensions,
-        targetDimensions: job.targetDimensions,
-        format: job.settings.outputFormat,
-        signal: controller.signal,
-        onProgress: (percent) => {
-          const nextProgress = Math.max(job.progress, Math.min(99, Math.round(percent)));
-          if (nextProgress !== job.progress) {
-            job.progress = nextProgress;
-            this.emit();
-          }
+      if (job.settings.processingMode === "webClear") {
+        await runWebClearEngine({
+          inputPath: job.inputPath,
+          outputPath,
+          targetDimensions: job.targetDimensions,
+          format: outputFormat,
+          signal: controller.signal
+        });
+      } else if (job.settings.processingMode === "aiAuto") {
+        // 智能模式：复刻 CodexSmartEnhance——GPT 看图分流，SUPIR 缺环境时按节点原逻辑回退 ESRGAN。
+        this.updateJobProgress(job, 20);
+        const decision = await analyzeImageForRoute(job.inputPath, controller.signal);
+        if (controller.signal.aborted) throw new Error("任务已取消。");
+        log(
+          `智能模式判定 ${job.fileName} -> ${decision.recommendedPipeline}` +
+            `${decision.fallback ? "（未走GPT，回退）" : ""}｜${decision.reasoning.slice(0, 160)}`
+        );
+        if (decision.recommendedPipeline === "supir" && supirResources().available) {
+          job.message = "AI 判定：照片 → SUPIR 扩散修复";
+          job.targetDimensions = computeSupirDimensions(
+            dimensions,
+            job.settings.maxSide,
+            SUPIR_TIERS[job.settings.supirTier].maxScale
+          );
+          this.emit();
+          await runComfyEngine({
+            inputPath: job.inputPath,
+            outputPath,
+            settings: { ...job.settings, processingMode: "aiRepair" },
+            inputDimensions: dimensions,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal,
+            supirOverrides: {
+              positivePrompt: decision.positivePrompt,
+              negativePrompt: decision.negativePrompt,
+              controlScale: decision.controlScale,
+              restorationScale: decision.restorationScale
+            },
+            onProgress: (percent) => this.updateJobProgress(job, 22 + percent * 0.76)
+          });
+        } else {
+          const routedModel =
+            decision.recommendedPipeline === "realesrgan_anime"
+              ? SMART_ROUTE_MODELS.realesrgan_anime
+              : SMART_ROUTE_MODELS.realesrgan_general;
+          job.message =
+            decision.recommendedPipeline === "realesrgan_anime"
+              ? "AI 判定：插画 → Anime6B"
+              : "AI 判定：通用 → RealESRGAN";
+          job.targetDimensions = computeTargetDimensions(dimensions, job.settings.maxSide, DEFAULT_SCALE);
+          this.emit();
+          await runComfyEngine({
+            inputPath: job.inputPath,
+            outputPath,
+            settings: { ...job.settings, processingMode: "aiUpscale", upscaleModel: routedModel },
+            inputDimensions: dimensions,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal,
+            onProgress: (percent) => this.updateJobProgress(job, 22 + percent * 0.76)
+          });
         }
-      });
+      } else if (job.settings.processingMode === "aiUpscaleWebClear") {
+        const intermediatePath = `${outputPath}.ai-tmp.${outputExtension(outputFormat)}`;
+        try {
+          await runComfyEngine({
+            inputPath: job.inputPath,
+            outputPath: intermediatePath,
+            settings: job.settings,
+            inputDimensions: dimensions,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal,
+            onProgress: (percent) => this.updateJobProgress(job, 18 + percent * 0.64)
+          });
+          job.message = "正在套用网页增强";
+          this.updateJobProgress(job, 86);
+          await runWebClearEngine({
+            inputPath: intermediatePath,
+            outputPath,
+            targetDimensions: job.targetDimensions,
+            format: outputFormat,
+            signal: controller.signal
+          });
+        } finally {
+          await fsp.rm(intermediatePath, { force: true }).catch(() => {
+            // 清理失败不影响任务终态。
+          });
+        }
+      } else {
+        await runComfyEngine({
+          inputPath: job.inputPath,
+          outputPath,
+          settings: job.settings,
+          inputDimensions: dimensions,
+          targetDimensions: job.targetDimensions,
+          format: outputFormat,
+          signal: controller.signal,
+          onProgress: (percent) => this.updateJobProgress(job, percent)
+        });
+      }
 
       job.message = "正在保存输出";
       job.progress = Math.max(job.progress, 92);
       this.emit();
+
+      job.outputBytes = await fsp
+        .stat(outputPath)
+        .then((stat) => stat.size)
+        .catch(() => null);
 
       job.status = "succeeded";
       job.finishedAt = Date.now();
@@ -154,7 +279,7 @@ export class JobQueue {
       job.progress = 100;
       job.message = "已完成";
       job.error = null;
-      this.emit();
+      this.emitNow();
       log(`任务完成 ${job.fileName} 用时 ${job.finishedAt - (job.startedAt ?? job.finishedAt)}ms -> ${outputPath}`);
     } catch (error) {
       job.status = controller.signal.aborted ? "cancelled" : "failed";
@@ -163,7 +288,7 @@ export class JobQueue {
       job.progress = 100;
       job.message = job.status === "cancelled" ? "已取消" : "处理失败";
       job.error = formatJobError(error);
-      this.emit();
+      this.emitNow();
       log(`任务${job.status === "cancelled" ? "取消" : "失败"} ${job.fileName} ${job.error ?? ""}`);
     } finally {
       this.abortControllers.delete(job.id);
@@ -171,8 +296,33 @@ export class JobQueue {
     }
   }
 
-  /** 只广播最新任务给 UI（廉价）。进度高频更新走这里，不碰磁盘。 */
+  private updateJobProgress(job: UpscaleJob, percent: number): void {
+    const nextProgress = Math.max(job.progress, Math.min(99, Math.round(percent)));
+    if (nextProgress !== job.progress) {
+      job.progress = nextProgress;
+      this.emit();
+    }
+  }
+
+  /** 高频进度更新合并到 ~100ms 一次广播，避免每 +1% 就全量序列化 300 条任务过 IPC。 */
   private emitToUi(): void {
+    if (this.uiTimer) return;
+    this.uiTimer = setTimeout(() => {
+      this.uiTimer = null;
+      this.sendJobsToUi();
+    }, 100);
+  }
+
+  /** 立即广播（状态跃迁走这里，保证 UI 秒级反馈），并吞掉未触发的节流定时器。 */
+  private emitToUiNow(): void {
+    if (this.uiTimer) {
+      clearTimeout(this.uiTimer);
+      this.uiTimer = null;
+    }
+    this.sendJobsToUi();
+  }
+
+  private sendJobsToUi(): void {
     this.getWindow()?.webContents.send("jobs:updated", this.getJobs());
   }
 
@@ -187,9 +337,15 @@ export class JobQueue {
     }, 500);
   }
 
-  /** UI 广播 + 节流落盘。常规更新（含进度）走这里。 */
+  /** 节流 UI 广播 + 节流落盘。高频进度更新走这里。 */
   private emit(): void {
     this.emitToUi();
+    this.schedulePersist();
+  }
+
+  /** 即时 UI 广播 + 节流落盘。任务创建/状态跃迁走这里。 */
+  private emitNow(): void {
+    this.emitToUiNow();
     this.schedulePersist();
   }
 
@@ -224,7 +380,7 @@ function createJob(inputPath: string, settings: UpscaleSettings): UpscaleJob {
     error: null,
     dimensions: null,
     targetDimensions: null,
-    tileSize: null
+    outputBytes: null
   };
 }
 
@@ -233,13 +389,33 @@ function elapsedDuration(job: UpscaleJob): number {
   return Math.max(0, job.finishedAt - job.startedAt);
 }
 
-function buildOutputPath(inputPath: string, outputDirectory: string, format: UpscaleSettings["outputFormat"]): string {
-  const parsed = path.parse(inputPath);
-  const ext = outputExtension(format);
-  return path.join(outputDirectory, `${parsed.name}_upscaled.${ext}`);
+function processingMessage(mode: UpscaleSettings["processingMode"]): string {
+  if (mode === "webClear") return "正在套用网页同款增强";
+  if (mode === "aiUpscaleWebClear") return "正在用 AI 引擎放大";
+  if (mode === "aiRepair") return "正在用 SUPIR 智能修复（单张数分钟）";
+  if (mode === "aiAuto") return "正在让 GPT 分析画面";
+  return "正在用 AI 引擎处理";
+}
+
+function resolveJobOutputFormat(settings: UpscaleSettings, hasAlpha: boolean): ConcreteImageFormat {
+  const mode = settings.processingMode;
+  if (mode === "aiUpscale" || mode === "aiRepair" || mode === "aiAuto") return "png";
+  return resolveConcreteFormat(settings.outputFormat, hasAlpha);
+}
+
+async function computeJobTargetDimensions(
+  inputPath: string,
+  dimensions: NonNullable<UpscaleJob["dimensions"]>,
+  settings: UpscaleSettings
+): Promise<NonNullable<UpscaleJob["targetDimensions"]>> {
+  if (settings.processingMode === "aiUpscale")
+    return computeWorkerOutputDimensions(inputPath, settings.maxSide || 4096);
+  if (settings.processingMode === "webClear") return computeWebClearDimensions(dimensions, settings.maxSide);
+  if (settings.processingMode === "aiRepair")
+    return computeSupirDimensions(dimensions, settings.maxSide, SUPIR_TIERS[settings.supirTier].maxScale);
+  return computeTargetDimensions(dimensions, settings.maxSide, DEFAULT_SCALE);
 }
 
 function formatJobError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return `${message} 当前版本只保留网站同款 AI 链路，请确认内置 ComfyUI Runtime 和 4x-UltraSharp.pth 完整。`;
+  return error instanceof Error ? error.message : String(error);
 }

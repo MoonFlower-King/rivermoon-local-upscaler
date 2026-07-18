@@ -2,7 +2,25 @@
   "name": "rivermoon-local-upscaler",
   "version": "0.1.0",
   "private": true,
-  "description": "RiverMoon 本地图片超分桌面应用",
+  "description": "连接 rivermoon7.com 的 AI 生图、视频、GPT 对话与本地超分桌面应用",
+  "license": "MIT",
+  "author": "RiverMoon Contributors",
+  "homepage": "https://github.com/MoonFlower-King/rivermoon-local-upscaler#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoonFlower-King/rivermoon-local-upscaler.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MoonFlower-King/rivermoon-local-upscaler/issues"
+  },
+  "keywords": [
+    "electron",
+    "ai-image-generation",
+    "ai-video-generation",
+    "image-upscaling",
+    "comfyui",
+    "cuda"
+  ],
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -12,7 +30,26 @@
     "dev:electron": "concurrently -k \"npm:dev\" \"npm:electron\"",
     "dist": "npm run build && electron-builder --win nsis",
     "dist:dir": "npm run build && electron-builder --win dir",
+    "agent:responses-smoke": "node scripts/agent-responses-smoke.mjs",
+    "image:contract-smoke": "npm run build && node scripts/image-contract-smoke.mjs",
+    "video:contract-smoke": "npm run build && node scripts/video-contract-smoke.mjs",
+    "video:paid-e2e": "npm run build && node scripts/video-paid-e2e.mjs",
+    "video:paid-e2e:dry-run": "npm run build && node scripts/video-paid-e2e.mjs --dry-run",
+    "release:launch-smoke": "node scripts/release-launch-smoke.mjs",
+    "release:smoke": "node scripts/release-smoke.mjs",
+    "release:github:assets": "node scripts/create-github-release-assets.mjs",
+    "release:github:metadata": "node scripts/create-github-release-assets.mjs --metadata-only",
+    "release:github:preflight": "node scripts/release-github-preflight.mjs",
+    "release:github": "npm run release:verify && npm run release:github:assets && npm run release:github:preflight",
+    "release:online-smoke": "npm run agent:responses-smoke && npm run image:contract-smoke && npm run video:contract-smoke",
+    "release:verify": "npm run check && npm run dist:dir && npm run release:smoke && npm run release:launch-smoke",
+    "repo:preflight": "node scripts/repo-preflight.mjs",
+    "repo:preflight:strict": "node scripts/repo-preflight.mjs --strict",
+    "check": "npm run repo:preflight && npm run format:check && npm run lint && npm test && npm run build",
     "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,cjs}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,cjs}\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -20,26 +57,32 @@
     "node": ">=20"
   },
   "dependencies": {
+    "lucide-react": "^1.24.0",
     "sharp": "^0.34.1"
   },
   "devDependencies": {
-    "@types/node": "^22.10.7",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.13.2",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
-    "electron": "^34.0.0",
+    "electron": "^42.5.2",
     "electron-builder": "^25.1.8",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.62.1",
     "vite": "^6.0.7",
     "vitest": "^4.1.9",
     "wait-on": "^8.0.2"
   },
   "build": {
     "appId": "com.rivermoon.localupscaler",
-    "productName": "RiverMoon 本地超分",
+    "productName": "RiverMoon AI 创作台",
     "directories": {
       "output": "release"
     },
@@ -58,15 +101,18 @@
           "!custom_nodes/ComfyUI-SUPIR/**",
           "!models/diffbir/**",
           "!models/checkpoints/**",
-          "!models/upscale_models/4x_foolhardy_Remacri.pth",
-          "!models/upscale_models/4x_NMKD-Siax_200k.pth",
-          "!models/upscale_models/RealESRGAN_x4plus.pth",
-          "!models/upscale_models/RealESRGAN_x4plus_anime_6B.pth"
+          "!models/upscale_models/*.pth"
         ]
       },
       {
         "from": "docs",
-        "to": "docs"
+        "to": "docs",
+        "filter": [
+          "PRODUCT_DOCUMENT.md",
+          "PRODUCT_REPORT_BILINGUAL.md",
+          "USER_GUIDE_BILINGUAL.md",
+          "BUILD_AND_RELEASE.md"
+        ]
       },
       {
         "from": "build/icon.ico",

@@ -200,7 +200,7 @@
   用户感知差距的真实来源：网站另有 `/v1/images/ai-enhance`（外部 ComfyUI worker、10min 超时、真 AI），
   worker 的 workflow/模型未确认（server.js 750 权限，需用户授权 SSH 读取）；测试图为失焦人像，
   锐化类增强救不回失焦，疑似 web 端做了人脸修复（GFPGAN/CodeFormer 类）。桌面若要对齐需确认 worker 配置后接入等效模型。
-  证据图：`C:\Users\28692\Desktop\超分对比-100%细节.png`（四联 100% 裁块）。
+  证据图存维护者本机（四联 100% 裁块对比）。
 - 2026-07-16 任务记录逐条删除：JobQueue.removeJob + jobs:remove IPC + 任务卡「删除」按钮（终态可删、
   运行中先取消、不动输出文件）。227 tests 通过。
 - 2026-07-16 M12 网站 ComfyUI 工作流复刻（决定性收尾）：ai-enhance worker 就在本机 D:/ComfyUI，
@@ -216,9 +216,8 @@
   keep_model_loaded=true（da41fed）；③ 智能模式 aiAuto 新按钮（182433d）——smart-route.ts 复刻
   CodexSmartEnhance 的 GPT 分流（提示词逐字照抄），照片→SUPIR（动态提示词注入）、插画→Anime6B、
   文字→通用，无 Key/失败/缺 SUPIR 按节点原逻辑回退。GPT 调用需真实 Key，待用户 GUI 验收。
-  ⚠️ 旧 CodexEnhanced PNG 元数据嵌明文 API key（3 把），已提醒用户作废。
-- 2026-07-16 M12 修正（用户 SSH 贴出 server.js 派发段 + 本机找到生产 worker 脚本
-  C:/Users/28692/Documents/e/local-gpu-worker/rivermoon-local-gpu-worker.js）：
+  ⚠️ 历史 ComfyUI 产物 PNG 的元数据可能内嵌敏感配置，外发前需清洗（已提醒维护者处理）。
+- 2026-07-16 M12 修正（依据生产服务派发段与维护者本机的生产 worker 脚本核实）：
   **网站生产 ai-enhance 预设固定 ai_4x_ultrasharp（UltraSharp 工作流），SUPIR 是本机实验链路、
   生产未接**。worker 的 prompt 图（节点 1-5 LoadImage→UpscaleModelLoader→ImageUpscaleWithModel→
   ImageScale(lanczos)→SaveImage）与桌面 buildStandardPrompt 逐字段一致，尺寸公式

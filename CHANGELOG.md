@@ -12,6 +12,9 @@
 - AI 生图会话式工作台：独立会话列表、会话内任务流、提交即出现的多任务卡片，以及结果图一键继续编辑。
 - GitHub 开源配套：中英文 README、贡献/安全/支持文档、CodeQL、Dependabot、CODEOWNERS。
 - `npm run repo:preflight`：检查待公开文件、Git 历史大对象、密钥痕迹和生成物。
+- 超分处理模式扩展为五档：网站 AI 高清修复（UltraSharp 工作流）、AI+网页增强、仅网页增强（秒级 sharp 链）、SUPIR 扩散修复（快速×1.5 / 高清×4 双强度，需本机 SUPIR 环境）、智能模式（GPT 看图自动分流，未连接 Key 自动回退本地链路）。
+- 超分模型注册表新增 RealESRGAN x4plus 与 RealESRGAN Anime6B（均 BSD-3 可商用，按需下载 + SHA256 校验）。
+- 任务记录支持逐条删除（不删除输出文件）。
 
 ### Changed
 

@@ -42,10 +42,27 @@ them. This file is a technical inventory, not legal advice.
      commercial distribution. Verify the current upstream license and obtain
      any required permission before commercial use.
 
-5. Electron, React, sharp, libvips, and npm dependencies
+5. RealESRGAN_x4plus.pth and RealESRGAN_x4plus_anime_6B.pth
+   - Purpose: optional local image-upscaling models.
+   - Project: https://github.com/xinntao/Real-ESRGAN
+   - Recorded license: BSD 3-Clause.
+   - The models are not committed to Git and are filtered from application
+     packages. The app downloads them only after explicit user action.
+
+6. SUPIR and SDXL checkpoints (SUPIR repair mode)
+   - Purpose: optional diffusion-based image repair. This mode activates only
+     when the user's own local ComfyUI runtime already provides the
+     ComfyUI-SUPIR custom node and the SUPIR/SDXL checkpoint files.
+   - Neither the node nor the checkpoints are committed to Git or shipped in
+     application packages.
+   - Upstream terms apply, including the SUPIR project license and the SDXL
+     CreativeML Open RAIL++-M license. Verify them before any redistribution
+     or commercial use.
+
+7. Electron, React, sharp, libvips, and npm dependencies
    - These packages retain their upstream licenses. Consult package-lock.json
      and the packages' own license files before redistribution.
 
-6. RiverMoon name, icon, and other brand assets
+8. RiverMoon name, icon, and other brand assets
    - The source-code license does not grant trademark rights. Use of project
      branding must not imply endorsement by RiverMoon.

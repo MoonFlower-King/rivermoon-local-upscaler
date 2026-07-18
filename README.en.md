@@ -21,6 +21,9 @@ RiverMoon AI Studio contains both hosted AI features and a local GPU tool:
 | AI video generation | RiverMoon video gateway | Required | Prompts and reference images are sent to the service |
 | GPT chat and image analysis | RiverMoon Agent gateway | Required | Messages and image attachments are sent to the service |
 | Image upscaling | Local ComfyUI/CUDA | Not required | No |
+| Image upscaling · Smart Mode (optional) | Routing decision in the cloud, processing stays local | Required | A downscaled 512px preview is sent to the cloud for content-type detection |
+
+Upscaling is fully local and offline by default. Only when the user explicitly selects Smart Mode does the app send a 512px preview to a cloud GPT for content-type routing (photo / illustration / text); the actual image processing always runs locally, and the app falls back to the pure local pipeline when no Key is configured or the cloud is unreachable.
 
 This repository contains the open-source Windows desktop client. The hosted `rivermoon7.com` backend is not part of this repository. Cloud features require a user-provided API Key.
 
@@ -29,7 +32,7 @@ This repository contains the open-source Windows desktop client. The hosted `riv
 - Contract-driven AI image generation, editing, custom sizes, formats, qualities, and storyboard templates.
 - Text-to-video, image-to-video, multi-reference video, task recovery, and local downloads.
 - Streaming GPT responses, reasoning controls, image analysis, and local conversation history.
-- Local ComfyUI/PyTorch/CUDA upscaling with `4x-UltraSharp.pth` and a default 4096-pixel maximum side.
+- Local ComfyUI/PyTorch/CUDA upscaling with five processing modes (UltraSharp AI restore / AI + web-style enhance / enhance only / SUPIR diffusion repair / GPT smart routing), an on-demand model registry (4x-UltraSharp, RealESRGAN x4plus, RealESRGAN Anime6B), and a default 4096-pixel maximum side.
 - Unified local asset library, account balance, diagnostics, and GitHub Release update checks.
 
 ## Security model

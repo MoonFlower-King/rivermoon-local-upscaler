@@ -32,7 +32,7 @@ ComfyUI + PyTorch/CUDA + 4x-UltraSharp.pth
 
 重要说明：
 
-1. 本地图片超分不上传图片。
+1. 本地图片超分不上传图片。唯一例外是可选的「智能模式」：它会把一张缩小到 512 长边的预览图发送到云端做类型判定（照片/插画/文字），随后的图像处理仍全部在本机完成；未连接 Key 时自动回退纯本地链路。
 2. AI 生图、AI 视频、GPT 对话是云端能力，会连接 RiverMoon 服务。
 3. 当前版本需要 NVIDIA 显卡和 CUDA，不支持 AMD、Intel、CPU、DirectML fallback。
 4. 当前 exe 未代码签名，Windows 可能提示未知发布者。

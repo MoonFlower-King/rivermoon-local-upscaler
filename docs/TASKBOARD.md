@@ -224,3 +224,10 @@
   min(4, 4096/长边) 与 computeWorkerOutputDimensions 一致，连 rivermoon_ai_ 前缀、
   D:/ComfyUI:8188 实例都相同——「网站 AI 高清修复」模式与网站按钮可证等同。
   SUPIR 档 UI 文案已去掉「网站同款」表述。
+- 2026-07-19 v0.2.0 正式发布：main 合并（5809c36）+ 定版（9633605）+ tag v0.2.0 已推送；
+  GitHub Release 发布完成并标记 latest。资产 4 件（便携版 7z.001 1.68GB + SHA256SUMS +
+  manifest + 下载说明），主包 SHA256=0b7f15bb…（与随包校验文件逐字节一致，EOF 断传后已补传校验）。
+  发布页：https://github.com/MoonFlower-King/rivermoon-local-upscaler/releases/tag/v0.2.0
+  发布过程坑：gh 需经 Clash 7890 代理才能拿验证码；大文件首传 EOF，用 gh release upload --clobber 补传成功。
+  用户侧待办（GitHub 网页手动）：作废泄露 Key、开 secret scanning/push protection/Dependabot、
+  main 分支保护、补仓库描述与 Topics。

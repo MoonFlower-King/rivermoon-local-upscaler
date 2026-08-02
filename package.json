@@ -57,7 +57,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "lucide-react": "^1.24.0",
+    "lucide-react": "^1.28.0",
     "sharp": "^0.34.1"
   },
   "devDependencies": {

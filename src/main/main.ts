@@ -53,6 +53,7 @@ import {
 } from "./model-downloader.js";
 import { findModelSpec } from "./model-registry.js";
 import { checkForUpdates, isAllowedUpdatePageUrl } from "./update-checker.js";
+import { DEV_RENDERER_ORIGIN, isAllowedAppNavigation } from "./navigation.js";
 import type { AccountStatus, AppInfo, AssetStatus, HardwareReport, StartJobsPayload } from "./types.js";
 
 let mainWindow: BrowserWindow | null = null;
@@ -110,6 +111,7 @@ function isAllowedPath(value: unknown): value is string {
 configureLocalUserData();
 
 const preloadPath = path.join(app.getAppPath(), "dist", "preload", "index.js");
+const rendererIndexPath = path.join(app.getAppPath(), "dist", "renderer", "index.html");
 
 function configureLocalUserData(): void {
   const userDataRoot =
@@ -179,8 +181,7 @@ async function createWindow(): Promise<void> {
   // 一律拦截，避免渲染层被诱导跳转/弹窗到任意 URL（钓鱼、远程代码面）。
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, targetUrl) => {
-    const allowed = app.isPackaged ? "file://" : "http://127.0.0.1:5173";
-    if (!targetUrl.startsWith(allowed)) {
+    if (!isAllowedAppNavigation(targetUrl, { packaged: app.isPackaged, rendererIndexPath })) {
       event.preventDefault();
       log(`已拦截非法导航 -> ${targetUrl}`);
     }
@@ -229,9 +230,9 @@ async function createWindow(): Promise<void> {
 
   try {
     if (!app.isPackaged) {
-      await mainWindow.loadURL("http://127.0.0.1:5173");
+      await mainWindow.loadURL(DEV_RENDERER_ORIGIN);
     } else {
-      await mainWindow.loadFile(path.join(app.getAppPath(), "dist", "renderer", "index.html"));
+      await mainWindow.loadFile(rendererIndexPath);
     }
   } catch (error) {
     log(`窗口加载失败：${error instanceof Error ? error.message : String(error)}`);

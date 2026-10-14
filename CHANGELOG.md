@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Security
+
+- 主窗口导航校验改为按 URL 解析比较：开发态精确比较 origin（防 `http://127.0.0.1:5173@evil.com` 绕过），打包态只允许渲染层入口文件。
+
+### Changed
+
+- `package-lock.json` 依赖下载地址统一为 npm 官方源，避免受限网络与 CI 无法访问镜像源。
+
 ## [0.2.0] - 2026-07-18
 
 ### Added
